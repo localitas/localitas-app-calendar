@@ -228,7 +228,7 @@
     <script>
         (function() {
             const html = document.documentElement;
-            html.setAttribute('data-theme', localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+            html.setAttribute('data-theme', window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
             window.addEventListener('message', e => { if (e.data && e.data.type === 'theme-change') html.setAttribute('data-theme', e.data.theme); });
         })();
 
