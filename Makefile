@@ -97,3 +97,26 @@ restart-docker: stop-docker start-docker
 
 logs-docker:
 	@docker logs -f calendar
+
+# ── Release ───────────────────────────────────────────────────
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+build-release: lint
+	@mkdir -p dist
+	@echo "Building $(APP_NAME) $(VERSION) ($(COMMIT))..."
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath \
+		-o dist/calendar-server-darwin-arm64 ./cmd/calendar-server
+	GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)" -trimpath \
+		-o dist/calendar-server-darwin-amd64 ./cmd/calendar-server
+	@echo "Built: dist/calendar-server-darwin-arm64, dist/calendar-server-darwin-amd64"
+
+release: build-release
+	@if [ -z "$(VERSION)" ] || [ "$(VERSION)" = "dev" ]; then echo "Set VERSION=vX.Y.Z"; exit 1; fi
+	@echo "Creating release $(VERSION) on GitHub..."
+	gh release create $(VERSION) \
+		dist/calendar-server-darwin-arm64 \
+		dist/calendar-server-darwin-amd64 \
+		--title "$(VERSION)" --generate-notes
+	@echo "✅ Released $(VERSION)"
