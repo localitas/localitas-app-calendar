@@ -10,11 +10,11 @@ import (
 	"github.com/localitas/localitas-go"
 )
 
-//go:embed migrations/*.sql
+//go:embed _migrations/*.sql
 var migrationsFS embed.FS
 
 func applyEmbeddedMigrations(ctx context.Context, c *client.Client, dbID string) error {
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	entries, err := fs.ReadDir(migrationsFS, "_migrations")
 	if err != nil {
 		return err
 	}
@@ -26,7 +26,7 @@ func applyEmbeddedMigrations(ctx context.Context, c *client.Client, dbID string)
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		sqlBytes, err := fs.ReadFile(migrationsFS, "migrations/"+f)
+		sqlBytes, err := fs.ReadFile(migrationsFS, "_migrations/"+f)
 		if err != nil {
 			return err
 		}
