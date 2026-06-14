@@ -1,0 +1,10 @@
+name: calendar
+display_name: Calendar
+description: Event calendar with natural date parsing
+version: 0.1.0
+
+database:
+  name: calendar
+  system: true
+
+migrations_dir: migrations

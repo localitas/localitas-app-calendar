@@ -1,0 +1,911 @@
+{{define "index.html"}}
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calendar — Localitas</title>
+    <base href="{{.BasePath}}">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        :root { --sidebar-w: 240px; --color-bg-base: #fcfbfe; --color-bg-elevated: #f0eef7; --color-text-primary: #1a1625; --color-text-secondary: #4a3f5c; --color-glass-base: rgba(255,255,255,0.75); --color-glass-border: rgba(139,117,169,0.35); --color-accent: #7d6b96; --shadow: 0 4px 16px rgba(139,117,169,0.08); }
+        [data-theme="dark"] { --color-bg-base: #120f1a; --color-bg-elevated: #221b2e; --color-text-primary: #e8e4f0; --color-text-secondary: #b3a8c8; --color-glass-base: rgba(37,31,53,0.85); --color-glass-border: rgba(184,164,212,0.15); --color-accent: #c5b3e0; --shadow: 0 6px 24px rgba(0,0,0,0.4); }
+        html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--color-bg-base); color: var(--color-text-primary); display: flex; }
+        .bg { position:fixed; inset:0; background: radial-gradient(circle at 10% 20%, var(--color-bg-elevated), var(--color-bg-base) 90%); z-index:-1; }
+
+        .sidebar { width: var(--sidebar-w); min-width:180px; max-width:400px; flex-shrink:0; border-right:1px solid var(--color-glass-border); display:flex; flex-direction:column; background:var(--color-glass-base); position:relative; }
+        .resize-handle { position:absolute; right:0; top:0; bottom:0; width:4px; cursor:col-resize; z-index:5; }
+        .resize-handle:hover, .resize-handle:active { background:var(--color-accent); }
+        .sidebar-header { height:56px; min-height:56px; padding:0 0.75rem; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--color-glass-border); }
+        .sidebar-section { padding:0.25rem 0; }
+        .sidebar-section-title { font-size:0.6875rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; color:var(--color-text-secondary); padding:0.5rem 0.75rem 0.25rem; display:flex; justify-content:space-between; align-items:center; }
+        .sidebar-item { padding:0.4rem 0.75rem; cursor:pointer; display:flex; align-items:center; gap:0.5rem; font-size:0.8125rem; border-radius:0.375rem; margin:0.125rem 0.5rem; }
+        .sidebar-item:hover { background:rgba(142,122,168,0.15); }
+        .sidebar-item.active { background:rgba(168,85,247,0.15); font-weight:500; }
+        .account-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+        .add-btn { background:none; border:none; cursor:pointer; color:var(--color-text-secondary); padding:0.125rem; display:flex; }
+        .add-btn:hover { color:var(--color-accent); }
+        .delete-btn { background:none; border:none; cursor:pointer; color:var(--color-text-secondary); padding:0.125rem; display:none; font-size:0.75rem; }
+        .sidebar-item:hover .delete-btn { display:flex; }
+        .delete-btn:hover { color:#ef4444; }
+        .acct-card { margin:0.25rem 0.5rem; border-radius:0.375rem; overflow:hidden; cursor:pointer; }
+        .acct-card:hover { background:rgba(142,122,168,0.08); }
+        .acct-card.active { background:rgba(168,85,247,0.15); }
+        .acct-card-name { padding:0.375rem 0.75rem; font-size:0.8125rem; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .acct-card-actions { padding:0.125rem 0.75rem 0.375rem; display:flex; align-items:center; gap:0.375rem; font-size:0.6875rem; }
+        .acct-action-btn { background:none; border:none; cursor:pointer; color:var(--color-text-secondary); font-size:0.6875rem; padding:0; opacity:0.5; }
+        .acct-action-btn:hover { color:var(--color-accent); opacity:1; }
+        .acct-action-btn.error { color:#e88b8b; opacity:0.8; }
+        .acct-action-btn.error:hover { color:#ef4444; opacity:1; }
+
+        .main { flex:1; display:flex; flex-direction:column; min-width:0; }
+        .toolbar { height:56px; min-height:56px; padding:0 1rem; display:flex; align-items:center; gap:0.5rem; border-bottom:1px solid var(--color-glass-border); background:var(--color-glass-base); }
+        .btn { padding:0.375rem 0.75rem; border-radius:0.5rem; border:1px solid var(--color-glass-border); background:var(--color-glass-base); color:var(--color-text-primary); cursor:pointer; font-size:0.8125rem; display:flex; align-items:center; gap:0.25rem; }
+        .btn:hover { border-color:var(--color-accent); }
+        .btn-primary { background:var(--color-accent); color:var(--color-bg-elevated); border-color:var(--color-accent); }
+        .btn-sm { padding:0.25rem 0.5rem; font-size:0.75rem; }
+        .nav-btn { background:none; border:none; cursor:pointer; padding:0.25rem; color:var(--color-text-secondary); }
+        .nav-btn:hover { color:var(--color-text-primary); }
+        input, textarea, select { background:var(--color-glass-base); border:1px solid var(--color-glass-border); border-radius:0.375rem; padding:0.375rem 0.75rem; color:var(--color-text-primary); font-size:0.8125rem; outline:none; }
+        input:focus, textarea:focus, select:focus { border-color:var(--color-accent); }
+
+        .events-area { flex:1; overflow-y:auto; }
+        .day-section { border-bottom:1px solid var(--color-glass-border); }
+        .day-header { font-weight:600; color:var(--color-text-secondary); padding:0.5rem 1rem; font-size:0.6875rem; text-transform:uppercase; letter-spacing:0.05em; background:var(--color-bg-elevated); position:sticky; top:0; z-index:1; }
+        .day-header .day-date { color:var(--color-accent); font-size:0.8125rem; text-transform:none; letter-spacing:0; }
+        .day-header.weekend .day-date { color:#e88b8b; }
+        .day-header.weekend { color:#e88b8b; }
+        .day-header.holiday .day-date { color:#e88b8b; }
+        .day-header.holiday { color:#e88b8b; }
+        .holiday-name { font-size:0.625rem; font-weight:400; margin-left:0.5rem; font-style:italic; }
+        .day-header.today { background:rgba(142,122,168,0.15); }
+        .day-header.today .day-date { color:var(--color-accent); font-weight:700; }
+        .today-badge { display:inline-block; font-size:0.5625rem; font-weight:700; letter-spacing:0.08em; padding:0.0625rem 0.375rem; border-radius:1rem; background:var(--color-accent); color:#fff; vertical-align:middle; margin-left:0.375rem; }
+        [data-theme="dark"] .today-badge { background:#c5b3e0; color:#120f1a; }
+        @keyframes today-glow { 0% { background:rgba(142,122,168,0.35); } 100% { background:rgba(142,122,168,0.15); } }
+        .day-header.today.glow { animation: today-glow 1.5s ease-out; }
+        .event-row { padding:0.5rem 1rem; cursor:pointer; display:flex; align-items:flex-start; gap:0.75rem; border-bottom:1px solid var(--color-glass-border); transition:background 0.15s; }
+        .event-row:last-child { border-bottom:none; }
+        .event-row:hover { background:rgba(142,122,168,0.06); }
+        .event-time-col { width:60px; flex-shrink:0; font-size:0.75rem; color:var(--color-text-secondary); padding-top:0.0625rem; }
+        .event-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; margin-top:0.375rem; }
+        .event-content { flex:1; min-width:0; }
+        .event-title { font-weight:500; font-size:0.8125rem; }
+        .event-location { font-size:0.75rem; color:var(--color-text-secondary); }
+
+        .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); display:none; z-index:20; align-items:center; justify-content:center; }
+        .modal-overlay.visible { display:flex; }
+        .modal { background:var(--color-glass-base); backdrop-filter:blur(28px) saturate(150%); border:1px solid var(--color-glass-border); border-radius:0.75rem; padding:1.5rem; width:100%; max-width:480px; box-shadow:var(--shadow); }
+        .modal h3 { font-weight:600; margin-bottom:1rem; }
+        .modal label { display:block; font-size:0.8125rem; margin-bottom:0.25rem; color:var(--color-text-secondary); }
+        .modal input, .modal textarea, .modal select { width:100%; margin-bottom:0.75rem; padding:0.5rem; box-sizing:border-box; }
+        .row2 { display:flex; gap:0.5rem; }
+        .row2 > div { flex:1; }
+        .menu-btn { display:none; padding:0.375rem; border:none; background:none; cursor:pointer; color:var(--color-text-primary); }
+        @media (max-width: 768px) {
+            .sidebar { display:none; }
+            .sidebar.visible { display:flex; }
+            .menu-btn { display:flex; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg"></div>
+
+    <div class="sidebar" id="cal-sidebar">
+        <div class="resize-handle" id="resize-handle"></div>
+        <a onclick="fetch('/apps/calendar/help?format=html',{headers:getHeaders?getHeaders():{}}).then(r=>r.text()).then(h=>{document.querySelector('.events-area').innerHTML=h})" style="display:flex; align-items:center; gap:0.75rem; height:56px; min-height:56px; padding:0 1rem; border-bottom:1px solid var(--color-glass-border); color:var(--color-text-secondary); text-decoration:none; font-size:0.875rem; font-weight:500; flex-shrink:0; border-radius:0; cursor:pointer;">
+            <i data-lucide="book-open" style="width:18px; height:18px;"></i>
+            Documentation
+        </a>
+        <div class="sidebar-header">
+            <span style="font-weight:600; font-size:0.9375rem;"><i data-lucide="calendar" class="w-4 h-4" style="display:inline;vertical-align:middle;margin-right:0.25rem;"></i> Calendar</span>
+            <button class="btn btn-sm" onclick="syncAll()" title="Sync"><i data-lucide="refresh-cw" class="w-4 h-4" style="display:inline"></i></button>
+        </div>
+        <div style="flex:1; overflow-y:auto;">
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Accounts <button class="add-btn" onclick="openAccountSettings()" title="Add Account"><i data-lucide="plus" class="w-3 h-3" style="display:inline"></i></button></div>
+                <div class="sidebar-item active" id="all-item" onclick="selectAll()">
+                    <i data-lucide="calendar" style="width:14px;height:14px;display:inline;flex-shrink:0;"></i>
+                    <span>All Calendars</span>
+                </div>
+                <div id="accounts-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="toolbar">
+            <button class="menu-btn" onclick="document.getElementById('cal-sidebar').classList.toggle('visible')"><i data-lucide="menu" style="width:20px;height:20px;display:inline;"></i></button>
+            <button class="nav-btn" id="prev-btn"><i data-lucide="chevron-left" class="w-5 h-5" style="display:inline"></i></button>
+            <select id="month-select" style="background:transparent;border:none;color:var(--color-text-primary);font-size:0.875rem;font-weight:600;cursor:pointer;outline:none;" onchange="navChanged()"></select>
+            <select id="year-select" style="background:transparent;border:none;color:var(--color-text-primary);font-size:0.875rem;font-weight:600;cursor:pointer;outline:none;" onchange="navChanged()"></select>
+            <button class="nav-btn" id="next-btn"><i data-lucide="chevron-right" class="w-5 h-5" style="display:inline"></i></button>
+            <button class="btn btn-sm" id="today-btn">Today</button>
+            <div style="flex:1;"></div>
+            <input type="text" id="search-input" placeholder="Search events..." style="width:180px;" onkeydown="if(event.key==='Enter')searchEvents()">
+            <button class="btn btn-primary btn-sm" onclick="openModal()"><i data-lucide="plus" class="w-4 h-4" style="display:inline"></i> New</button>
+        </div>
+        <div class="events-area">
+            <div id="events-container"></div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="event-modal">
+        <div class="modal">
+            <h3 id="modal-title">New Event</h3>
+            <label>Calendar</label>
+            <select id="event-calendar" style="margin-bottom:0.75rem; padding:0.5rem;"></select>
+            <label>Title</label>
+            <input type="text" id="event-title" placeholder="Event title">
+            <label>Location</label>
+            <div style="position:relative;">
+                <input type="text" id="event-location" placeholder="Location" autocomplete="off" oninput="searchLocation(this.value)" onblur="setTimeout(function(){document.getElementById('location-suggestions').style.display='none';},200)">
+                <div id="location-suggestions" style="display:none; position:absolute; top:100%; left:0; right:0; z-index:30; background:var(--color-glass-base); backdrop-filter:blur(12px); border:1px solid var(--color-glass-border); border-radius:0 0 0.375rem 0.375rem; max-height:160px; overflow-y:auto;"></div>
+            </div>
+            <div class="row2">
+                <div><label>Start</label><input type="datetime-local" id="event-start" onchange="autoAdjustEnd()"></div>
+                <div><label>End</label><input type="datetime-local" id="event-end"></div>
+            </div>
+            <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+                <input type="checkbox" id="event-allday"> All day
+            </label>
+            <label>Description</label>
+            <textarea id="event-description" placeholder="Description" rows="3"></textarea>
+            <label>Reminders</label>
+            <div id="reminder-chips" style="display:flex; flex-wrap:wrap; gap:0.375rem; margin-bottom:0.75rem;">
+                <select id="reminder-add" style="padding:0.25rem 0.5rem; font-size:0.75rem;" onchange="addReminderChip()">
+                    <option value="">+ Add reminder</option>
+                    <option value="5">5 min before</option>
+                    <option value="10">10 min before</option>
+                    <option value="15">15 min before</option>
+                    <option value="30">30 min before</option>
+                    <option value="60">1 hour before</option>
+                    <option value="120">2 hours before</option>
+                    <option value="1440">1 day before</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+                <button class="btn btn-sm" id="modal-delete" style="color:#ef4444; display:none;" onclick="deleteEvent()">Delete</button>
+                <div style="flex:1;"></div>
+                <button class="btn" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveEvent()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="account-modal">
+        <div class="modal">
+            <h3 id="account-modal-title">Add Calendar Account</h3>
+            <label>Use Vault Credential</label>
+            <select id="vault-credential-select" onchange="applyVaultCredential()" style="margin-bottom:0.75rem; padding:0.5rem;">
+                <option value="">— Create one on Vault app —</option>
+            </select>
+            <label>Provider</label>
+            <select id="preset-select" onchange="applyPreset()" style="margin-bottom:0.75rem; padding:0.5rem;">
+                <option value="google" selected>Google Calendar (OAuth)</option>
+                <option value="">Custom CalDAV</option>
+            </select>
+            <label>Display Name</label>
+            <input type="text" id="acc-name" placeholder="Work Calendar">
+            <label>Email</label>
+            <input type="email" id="acc-email" placeholder="you@example.com">
+            <div id="caldav-fields">
+                <label>CalDAV URL</label>
+                <input type="text" id="acc-caldav-url" placeholder="https://caldav.example.com/dav/">
+                <div class="row2">
+                    <div><label>Username</label><input type="text" id="acc-username" placeholder="you@example.com"></div>
+                    <div><label>Password</label><input type="password" id="acc-password"></div>
+                </div>
+            </div>
+            <div id="google-fields" style="display:none;">
+                <label>Google Client ID</label>
+                <input type="text" id="acc-oauth-client-id" placeholder="xxxxx.apps.googleusercontent.com">
+                <label>Google Client Secret</label>
+                <input type="password" id="acc-oauth-client-secret">
+            </div>
+            <label>Color</label>
+            <input type="color" id="acc-color" value="#7d6b96" style="width:60px; height:32px; padding:2px;">
+            <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+                <button class="btn" onclick="closeAccountSettings()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveAccount()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="error-modal">
+        <div class="modal">
+            <h3 style="color:#e88b8b;">Sync Error</h3>
+            <pre id="error-modal-text" style="font-size:0.8125rem; white-space:pre-wrap; word-break:break-all; background:var(--color-bg-elevated); padding:0.75rem; border-radius:0.375rem; max-height:300px; overflow-y:auto;"></pre>
+            <div style="display:flex; justify-content:flex-end; margin-top:0.75rem;">
+                <button class="btn" onclick="closeErrorModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            const html = document.documentElement;
+            html.setAttribute('data-theme', localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+            window.addEventListener('message', e => { if (e.data && e.data.type === 'theme-change') html.setAttribute('data-theme', e.data.theme); });
+        })();
+
+        let accounts = [], calendars = [], currentAccountID = '', editingEventId = null;
+        let currentYear = new Date().getFullYear(), currentMonth = new Date().getMonth();
+        const colors = ['#7d6b96','#e88b8b','#60a5fa','#a8d5ba','#f5e6a8','#c5b3e0'];
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+        function getUSHolidays(year) {
+            const h = {};
+            h[year+'-01-01'] = "New Year's Day";
+            h[year+'-06-19'] = 'Juneteenth';
+            h[year+'-07-04'] = 'Independence Day';
+            h[year+'-11-11'] = "Veterans Day";
+            h[year+'-12-25'] = 'Christmas Day';
+            function nthDow(y, m, dow, n) { let d = new Date(y, m, 1); while (d.getDay() !== dow) d.setDate(d.getDate()+1); d.setDate(d.getDate()+(n-1)*7); return fmt(d); }
+            function lastDow(y, m, dow) { let d = new Date(y, m+1, 0); while (d.getDay() !== dow) d.setDate(d.getDate()-1); return fmt(d); }
+            h[nthDow(year,0,1,3)] = 'MLK Day';
+            h[nthDow(year,1,1,3)] = "Presidents' Day";
+            h[lastDow(year,4,1)] = 'Memorial Day';
+            h[nthDow(year,8,1,1)] = 'Labor Day';
+            h[nthDow(year,9,1,2)] = 'Columbus Day';
+            h[nthDow(year,10,3,4)] = 'Thanksgiving';
+            return h;
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            lucide.createIcons();
+            initNavSelectors();
+            await loadPresets();
+            await loadAccounts();
+            await loadCalendars();
+            loadEvents(true);
+            initResize();
+            syncAll();
+            startReminderPolling();
+
+            document.getElementById('prev-btn').addEventListener('click', () => { currentMonth--; if (currentMonth < 0) { currentMonth = 11; currentYear--; } updateNavSelectors(); loadEvents(); });
+            document.getElementById('next-btn').addEventListener('click', () => { currentMonth++; if (currentMonth > 11) { currentMonth = 0; currentYear++; } updateNavSelectors(); loadEvents(); });
+            document.getElementById('today-btn').addEventListener('click', () => { currentYear = new Date().getFullYear(); currentMonth = new Date().getMonth(); updateNavSelectors(); loadEvents(true); });
+            document.getElementById('search-input').addEventListener('input', e => { if (e.target.value.length > 1) searchEvents(); else loadEvents(); });
+        });
+
+        function initNavSelectors() {
+            const mSel = document.getElementById('month-select');
+            const ySel = document.getElementById('year-select');
+            mSel.innerHTML = monthNames.map((m, i) => '<option value="'+i+'"'+(i===currentMonth?' selected':'')+'>'+m+'</option>').join('');
+            const thisYear = new Date().getFullYear();
+            ySel.innerHTML = '';
+            for (let y = thisYear - 5; y <= thisYear + 5; y++) {
+                ySel.innerHTML += '<option value="'+y+'"'+(y===currentYear?' selected':'')+'>'+y+'</option>';
+            }
+        }
+
+        function updateNavSelectors() {
+            document.getElementById('month-select').value = currentMonth;
+            const ySel = document.getElementById('year-select');
+            if (!ySel.querySelector('[value="'+currentYear+'"]')) {
+                ySel.innerHTML += '<option value="'+currentYear+'">'+currentYear+'</option>';
+            }
+            ySel.value = currentYear;
+        }
+
+        window.navChanged = function() {
+            currentMonth = parseInt(document.getElementById('month-select').value);
+            currentYear = parseInt(document.getElementById('year-select').value);
+            loadEvents();
+        };
+
+        function initResize() {
+            const sidebar = document.getElementById('cal-sidebar'), handle = document.getElementById('resize-handle');
+            let isResizing = false, startX, startW;
+            handle.addEventListener('mousedown', e => { isResizing = true; startX = e.clientX; startW = sidebar.offsetWidth; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; });
+            document.addEventListener('mousemove', e => { if (!isResizing) return; const w = startW + (e.clientX - startX); if (w >= 180 && w <= 400) sidebar.style.width = w + 'px'; });
+            document.addEventListener('mouseup', () => { if (isResizing) { isResizing = false; document.body.style.cursor = ''; document.body.style.userSelect = ''; } });
+        }
+
+        async function loadPresets() {
+            try {
+                const resp = await fetch('api/presets');
+                const presets = await resp.json();
+                const sel = document.getElementById('preset-select');
+                for (const p of (presets || [])) {
+                    const opt = document.createElement('option');
+                    opt.value = JSON.stringify(p);
+                    opt.textContent = p.name;
+                    sel.appendChild(opt);
+                }
+            } catch(e) {}
+        }
+
+        function applyPreset() {
+            const val = document.getElementById('preset-select').value;
+            const isGoogle = val === 'google';
+            document.getElementById('caldav-fields').style.display = isGoogle ? 'none' : '';
+            document.getElementById('google-fields').style.display = isGoogle ? '' : 'none';
+            if (!isGoogle && val) {
+                try {
+                    const p = JSON.parse(val);
+                    document.getElementById('acc-caldav-url').value = p.caldav_url;
+                } catch(e) {}
+            }
+        }
+
+        async function loadAccounts() {
+            try {
+                const resp = await fetch('api/accounts');
+                accounts = (await resp.json()) || [];
+            } catch(e) { accounts = []; }
+        }
+
+        async function loadCalendars() {
+            try {
+                const resp = await fetch('api/calendars');
+                calendars = (await resp.json()) || [];
+            } catch(e) { calendars = []; }
+            renderAccountsSidebar();
+        }
+
+        function renderAccountsSidebar() {
+            const list = document.getElementById('accounts-list');
+            list.innerHTML = accounts.map(a => {
+                const acctCals = calendars.filter(c => c.account_id === a.id);
+                let actions = '<button class="acct-action-btn" onclick="event.stopPropagation();editAccount(\'' + a.id + '\')">edit</button>';
+                if (a.provider === 'google') {
+                    actions += '<button class="acct-action-btn" onclick="event.stopPropagation();authorizeGoogle(\'' + a.id + '\')">auth</button>';
+                }
+                actions += '<button class="acct-action-btn" onclick="event.stopPropagation();deleteAccount(\'' + a.id + '\')">remove</button>';
+                if (a.sync_error) {
+                    actions += '<button class="acct-action-btn error" onclick="event.stopPropagation();showSyncError(\'' + a.id + '\')">error</button>';
+                }
+                let calsHTML = '';
+                if (acctCals.length > 0) {
+                    calsHTML = acctCals.map(c => {
+                        const vis = c.is_visible ? '' : ' style="opacity:0.4;"';
+                        const checked = c.is_visible ? ' checked' : '';
+                        return '<div class="sidebar-item"' + vis + '>' +
+                            '<input type="checkbox"' + checked + ' style="accent-color:' + esc(c.color) + ';cursor:pointer;" onclick="event.stopPropagation();toggleCalendar(\'' + c.id + '\',' + c.is_visible + ')">' +
+                            '<input type="color" value="' + esc(c.color) + '" style="width:14px;height:14px;border:none;padding:0;cursor:pointer;background:none;flex-shrink:0;" onclick="event.stopPropagation();" onchange="updateCalColor(\'' + c.id + '\',this.value)">' +
+                            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(c.name || 'Calendar') + '</span>' +
+                            '</div>';
+                    }).join('');
+                }
+                return '<div class="acct-card">' +
+                    '<div class="acct-card-name">' + esc(a.name || a.email) + '</div>' +
+                    '<div class="acct-card-actions">' + actions + '</div>' +
+                    '</div>' + calsHTML;
+            }).join('');
+        }
+
+        async function toggleCalendar(calId, currentlyVisible) {
+            await fetch('api/calendars/' + calId, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({is_visible: !currentlyVisible})
+            });
+            await loadCalendars();
+            loadEvents();
+        }
+
+        async function updateCalColor(calId, color) {
+            await fetch('api/calendars/' + calId, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({color: color})
+            });
+            await loadCalendars();
+            loadEvents();
+        }
+
+        function showSyncError(id) {
+            const a = accounts.find(x => x.id === id);
+            if (!a || !a.sync_error) return;
+            document.getElementById('error-modal-text').textContent = a.sync_error;
+            document.getElementById('error-modal').classList.add('visible');
+        }
+        function closeErrorModal() { document.getElementById('error-modal').classList.remove('visible'); }
+
+        function selectAll() {
+            currentAccountID = '';
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            document.getElementById('all-item').classList.add('active');
+            loadEvents();
+        }
+
+        function selectAccount(id) {
+            currentAccountID = id;
+            document.querySelectorAll('.sidebar-item').forEach(el => el.classList.remove('active'));
+            document.querySelector('[onclick="selectAccount(\'' + id + '\')"]')?.classList.add('active');
+            loadEvents();
+        }
+
+        async function deleteAccount(id) {
+            var confirmed = await window.confirmModal.show({title:'Remove Account', message:'Remove this account and its events?', confirmText:'Remove', confirmClass:'btn-danger'});
+            if (!confirmed) return;
+            await fetch('api/accounts/' + id, {method:'DELETE'});
+            if (currentAccountID === id) currentAccountID = '';
+            await loadAccounts();
+            await loadCalendars();
+            loadEvents();
+        }
+
+        function loadEvents(scrollToday) {
+            const start = new Date(currentYear, currentMonth, 1);
+            const end = new Date(currentYear, currentMonth + 1, 0);
+
+            fetch('api/events?start=' + fmt(start) + '&end=' + fmt(end))
+                .then(r => r.json())
+                .then(data => {
+                    renderEvents(data.days || []);
+                    if (scrollToday) setTimeout(scrollToToday, 50);
+                })
+                .catch(() => {});
+        }
+
+        function searchEvents() {
+            const q = document.getElementById('search-input').value.trim();
+            if (!q) { loadEvents(); return; }
+            fetch('api/search?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(events => {
+                    const container = document.getElementById('events-container');
+                    if (!events || !events.length) { container.innerHTML = '<p style="text-align:center;padding:2rem;color:var(--color-text-secondary);">No results</p>'; return; }
+                    container.innerHTML = events.map(e => renderEventRow(e)).join('');
+                    lucide.createIcons();
+                });
+        }
+
+        function renderEvents(days) {
+            const container = document.getElementById('events-container');
+            if (!days.length) { container.innerHTML = '<p style="text-align:center;padding:3rem;color:var(--color-text-secondary);">No events in this range</p>'; return; }
+            const holidays = getUSHolidays(currentYear);
+            container.innerHTML = days.map(d => {
+                const hasEvents = d.events && d.events.length > 0;
+                const eventsHTML = hasEvents ? d.events.map(e => renderEventRow(e)).join('') : '';
+                const parts = (d.date_label || '').split(', ');
+                const dayName = parts[0] || '';
+                const datePart = parts.slice(1).join(', ') || d.date;
+                const dateObj = new Date(d.date + 'T00:00:00');
+                const dow = dateObj.getDay();
+                const isWeekend = dow === 0 || dow === 6;
+                const isToday = d.date === fmt(new Date());
+                const holiday = holidays[d.date];
+                let cls = 'day-header';
+                if (isToday) cls += ' today';
+                if (isWeekend) cls += ' weekend';
+                if (holiday) cls += ' holiday';
+                const holidayLabel = holiday ? '<span class="holiday-name">' + esc(holiday) + '</span>' : '';
+                const todayBadge = isToday ? ' <span class="today-badge">TODAY</span>' : '';
+                return '<div class="day-section">' +
+                    '<div class="' + cls + '" data-date="' + d.date + '"><span class="day-date">' + esc(datePart) + '</span> ' + esc(dayName) + todayBadge + holidayLabel + '</div>' +
+                    eventsHTML + '</div>';
+            }).join('');
+        }
+
+        function scrollToToday() {
+            const todayEl = document.querySelector('.day-header.today');
+            if (!todayEl) return;
+            todayEl.scrollIntoView({behavior:'smooth', block:'start'});
+            todayEl.classList.remove('glow');
+            void todayEl.offsetWidth;
+            todayEl.classList.add('glow');
+        }
+
+        function renderEventRow(e) {
+            const color = e.color || '#7d6b96';
+            const timeStr = e.all_day ? 'All day' : new Date(e.start_time).toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+            return '<div class="event-row" onclick="openModal(\'' + e.id + '\')">' +
+                '<div class="event-time-col">' + timeStr + '</div>' +
+                '<span class="event-dot" style="background:' + color + ';"></span>' +
+                '<div class="event-content"><div class="event-title">' + esc(e.title) + '</div>' +
+                (e.location ? '<div class="event-location">' + esc(e.location) + '</div>' : '') +
+                '</div></div>';
+        }
+
+        function populateCalendarDropdown(selectedCalId) {
+            const sel = document.getElementById('event-calendar');
+            sel.innerHTML = '<option value="">Local only</option>';
+            for (const a of accounts) {
+                const acctCals = calendars.filter(c => c.account_id === a.id && c.is_visible);
+                for (const c of acctCals) {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = (a.name || a.email) + ' — ' + (c.name || 'Calendar');
+                    opt.style.color = c.color;
+                    if (c.id === selectedCalId) opt.selected = true;
+                    sel.appendChild(opt);
+                }
+            }
+        }
+
+        function openModal(id) {
+            editingEventId = id || null;
+            document.getElementById('modal-title').textContent = id ? 'Edit Event' : 'New Event';
+            document.getElementById('modal-delete').style.display = id ? 'inline-flex' : 'none';
+            if (id) {
+                fetch('api/events/' + id).then(r => r.json()).then(e => {
+                    populateCalendarDropdown(e.calendar_id);
+                    document.getElementById('event-calendar').disabled = true;
+                    document.getElementById('event-title').value = e.title || '';
+                    document.getElementById('event-location').value = e.location || '';
+                    document.getElementById('event-description').value = e.description || '';
+                    document.getElementById('event-allday').checked = e.all_day;
+                    document.getElementById('event-start').value = toLocalISO(new Date(e.start_time));
+                    document.getElementById('event-end').value = toLocalISO(new Date(e.end_time));
+                    loadRemindersForEvent(id);
+                });
+            } else {
+                populateCalendarDropdown('');
+                document.getElementById('event-calendar').disabled = false;
+                const now = new Date(); now.setMinutes(0, 0, 0);
+                const later = new Date(now); later.setHours(later.getHours() + 1);
+                document.getElementById('event-title').value = '';
+                document.getElementById('event-location').value = '';
+                document.getElementById('event-description').value = '';
+                document.getElementById('event-allday').checked = false;
+                document.getElementById('event-start').value = toLocalISO(now);
+                document.getElementById('event-end').value = toLocalISO(later);
+                loadRemindersForEvent(null);
+            }
+            document.getElementById('event-modal').classList.add('visible');
+        }
+
+        var _locTimer = null;
+        var _locCountry = (function() {
+            var tzMap = {
+                'America/': 'us', 'US/': 'us',
+                'Canada/': 'ca', 'America/Toronto': 'ca', 'America/Vancouver': 'ca', 'America/Montreal': 'ca', 'America/Edmonton': 'ca', 'America/Winnipeg': 'ca', 'America/Halifax': 'ca',
+                'America/Mexico_City': 'mx', 'America/Cancun': 'mx', 'America/Tijuana': 'mx',
+                'America/Sao_Paulo': 'br', 'America/Fortaleza': 'br', 'America/Manaus': 'br',
+                'America/Argentina/': 'ar', 'America/Bogota': 'co', 'America/Lima': 'pe', 'America/Santiago': 'cl',
+                'Europe/London': 'gb', 'Europe/Paris': 'fr', 'Europe/Berlin': 'de', 'Europe/Rome': 'it', 'Europe/Madrid': 'es',
+                'Europe/Amsterdam': 'nl', 'Europe/Brussels': 'be', 'Europe/Zurich': 'ch', 'Europe/Vienna': 'at',
+                'Europe/Stockholm': 'se', 'Europe/Oslo': 'no', 'Europe/Copenhagen': 'dk', 'Europe/Helsinki': 'fi',
+                'Europe/Warsaw': 'pl', 'Europe/Prague': 'cz', 'Europe/Budapest': 'hu', 'Europe/Bucharest': 'ro',
+                'Europe/Athens': 'gr', 'Europe/Istanbul': 'tr', 'Europe/Moscow': 'ru', 'Europe/Kiev': 'ua',
+                'Europe/Lisbon': 'pt', 'Europe/Dublin': 'ie',
+                'Asia/Tokyo': 'jp', 'Asia/Seoul': 'kr', 'Asia/Shanghai': 'cn', 'Asia/Hong_Kong': 'hk',
+                'Asia/Taipei': 'tw', 'Asia/Singapore': 'sg', 'Asia/Kolkata': 'in', 'Asia/Calcutta': 'in',
+                'Asia/Bangkok': 'th', 'Asia/Jakarta': 'id', 'Asia/Manila': 'ph', 'Asia/Kuala_Lumpur': 'my',
+                'Asia/Dubai': 'ae', 'Asia/Riyadh': 'sa', 'Asia/Jerusalem': 'il', 'Asia/Tehran': 'ir',
+                'Australia/Sydney': 'au', 'Australia/Melbourne': 'au', 'Australia/Brisbane': 'au', 'Australia/Perth': 'au',
+                'Pacific/Auckland': 'nz', 'Africa/Cairo': 'eg', 'Africa/Lagos': 'ng', 'Africa/Johannesburg': 'za'
+            };
+            var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            for (var prefix in tzMap) {
+                if (tz === prefix || tz.startsWith(prefix)) return tzMap[prefix];
+            }
+            return '';
+        })();
+
+        function searchLocation(q) {
+            var box = document.getElementById('location-suggestions');
+            clearTimeout(_locTimer);
+            if (!q || q.length < 3) { box.style.display = 'none'; return; }
+            _locTimer = setTimeout(function() {
+                var ccParam = _locCountry ? '&countrycodes=' + _locCountry : '';
+                fetch('https://nominatim.openstreetmap.org/search?format=json&limit=5' + ccParam + '&q=' + encodeURIComponent(q), {
+                    headers: {'Accept-Language': 'en'}
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(results) {
+                    if (!results || !results.length) { box.style.display = 'none'; return; }
+                    box.innerHTML = results.map(function(r) {
+                        return '<div style="padding:0.375rem 0.5rem;cursor:pointer;font-size:0.8125rem;border-bottom:1px solid var(--color-glass-border);" onmousedown="pickLocation(\'' + esc(r.display_name).replace(/'/g, "\\'") + '\')">' + esc(r.display_name) + '</div>';
+                    }).join('');
+                    box.style.display = '';
+                })
+                .catch(function() { box.style.display = 'none'; });
+            }, 300);
+        }
+
+        function pickLocation(name) {
+            document.getElementById('event-location').value = name;
+            document.getElementById('location-suggestions').style.display = 'none';
+        }
+
+        function autoAdjustEnd() {
+            const startVal = document.getElementById('event-start').value;
+            if (!startVal) return;
+            const s = new Date(startVal);
+            const e = new Date(s.getTime() + 60 * 60 * 1000);
+            document.getElementById('event-end').value = toLocalISO(e);
+        }
+
+        var _currentReminders = [];
+
+        function renderReminderChips() {
+            var container = document.getElementById('reminder-chips');
+            var select = document.getElementById('reminder-add');
+            var chips = _currentReminders.map(function(mins) {
+                var label = mins >= 1440 ? (mins/1440) + ' day' : mins >= 60 ? (mins/60) + ' hr' : mins + ' min';
+                return '<span style="display:inline-flex;align-items:center;gap:0.25rem;padding:0.125rem 0.5rem;background:var(--color-bg-elevated);border:1px solid var(--color-glass-border);border-radius:1rem;font-size:0.75rem;">' +
+                    label + ' before <button style="background:none;border:none;cursor:pointer;color:var(--color-text-secondary);font-size:0.875rem;padding:0;" onclick="removeReminderChip(' + mins + ')">&times;</button></span>';
+            }).join('');
+            container.innerHTML = chips + select.outerHTML;
+            document.getElementById('reminder-add').value = '';
+        }
+
+        function addReminderChip() {
+            var sel = document.getElementById('reminder-add');
+            var mins = parseInt(sel.value);
+            if (!mins || _currentReminders.indexOf(mins) >= 0) { sel.value = ''; return; }
+            _currentReminders.push(mins);
+            _currentReminders.sort(function(a,b) { return a-b; });
+            renderReminderChips();
+        }
+
+        function removeReminderChip(mins) {
+            _currentReminders = _currentReminders.filter(function(m) { return m !== mins; });
+            renderReminderChips();
+        }
+
+        function loadRemindersForEvent(eventId) {
+            _currentReminders = [];
+            if (!eventId) { renderReminderChips(); return; }
+            fetch('api/events/' + eventId + '/reminders')
+                .then(function(r) { return r.json(); })
+                .then(function(reminders) {
+                    _currentReminders = (reminders || []).map(function(r) { return r.minutes_before; });
+                    renderReminderChips();
+                })
+                .catch(function() { renderReminderChips(); });
+        }
+
+        function saveReminders(eventId) {
+            if (!eventId || !_currentReminders.length) return;
+            fetch('api/events/' + eventId + '/reminders', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({minutes_before: _currentReminders})
+            });
+        }
+
+        function startReminderPolling() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+            setInterval(function() {
+                fetch('api/reminders/pending')
+                    .then(function(r) { return r.json(); })
+                    .then(function(pending) {
+                        if (!pending || !pending.length) return;
+                        pending.forEach(function(p) {
+                            var startTime = new Date(p.event_start);
+                            var timeStr = startTime.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+                            var body = p.minutes_before + ' min before — ' + timeStr;
+                            if (p.location) body += '\n' + p.location;
+                            if ('Notification' in window && Notification.permission === 'granted') {
+                                new Notification(p.event_title, {body: body, icon: '📅'});
+                            }
+                            fetch('api/reminders/' + p.reminder_id, {method: 'DELETE'}).catch(function(){});
+                        });
+                        pending.forEach(function(p) {
+                            fetch('api/events/' + p.reminder_id + '/reminders').catch(function(){});
+                        });
+                    })
+                    .catch(function() {});
+            }, 60000);
+        }
+
+        function closeModal() { document.getElementById('event-modal').classList.remove('visible'); editingEventId = null; }
+
+        function saveEvent() {
+            const body = {
+                title: document.getElementById('event-title').value,
+                description: document.getElementById('event-description').value,
+                location: document.getElementById('event-location').value,
+                start_time: new Date(document.getElementById('event-start').value).toISOString(),
+                end_time: new Date(document.getElementById('event-end').value).toISOString(),
+                all_day: document.getElementById('event-allday').checked,
+                calendar_id: document.getElementById('event-calendar').value || '',
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+            };
+            if (body.all_day) { doSaveEvent(body); return; }
+            var excludeId = editingEventId || '';
+            fetch('api/conflicts?start=' + encodeURIComponent(body.start_time) + '&end=' + encodeURIComponent(body.end_time) + '&exclude_id=' + excludeId)
+                .then(function(r) { return r.json(); })
+                .then(async function(conflicts) {
+                    if (conflicts && conflicts.length > 0) {
+                        var names = conflicts.map(function(c) { return c.title; }).join(', ');
+                        var confirmed = await window.confirmModal.show({title:'Overlap Warning', message:'This overlaps with: ' + names + '. Save anyway?', confirmText:'Save', confirmClass:'btn-primary'});
+                        if (!confirmed) return;
+                    }
+                    doSaveEvent(body);
+                })
+                .catch(function() { doSaveEvent(body); });
+        }
+
+        function doSaveEvent(body) {
+            const method = editingEventId ? 'PUT' : 'POST';
+            const url = editingEventId ? 'api/events/' + editingEventId : 'api/events';
+            fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) })
+                .then(r => r.json())
+                .then(saved => {
+                    var eid = editingEventId || (saved && saved.id);
+                    if (eid && _currentReminders.length > 0) saveReminders(eid);
+                    closeModal(); loadEvents();
+                });
+        }
+
+        async function deleteEvent() {
+            if (!editingEventId) return;
+            var confirmed = await window.confirmModal.show({title:'Delete Event', message:'Delete this event?', confirmText:'Delete', confirmClass:'btn-danger'});
+            if (!confirmed) return;
+            fetch('api/events/' + editingEventId, { method: 'DELETE' })
+                .then(() => { closeModal(); loadEvents(); });
+        }
+
+        var _editingAcctId = null;
+
+        async function openAccountSettings() {
+            _editingAcctId = null;
+            document.getElementById('account-modal-title').textContent = 'Add Calendar Account';
+            document.getElementById('acc-name').value = '';
+            document.getElementById('acc-email').value = '';
+            document.getElementById('acc-caldav-url').value = '';
+            document.getElementById('acc-username').value = '';
+            document.getElementById('acc-password').value = '';
+            document.getElementById('acc-oauth-client-id').value = '';
+            document.getElementById('acc-oauth-client-secret').value = '';
+            document.getElementById('acc-color').value = '#7d6b96';
+            document.getElementById('preset-select').value = 'google';
+            document.getElementById('vault-credential-select').value = '';
+            document.getElementById('caldav-fields').style.display = 'none';
+            document.getElementById('google-fields').style.display = '';
+            await loadVaultCredentials();
+            document.getElementById('account-modal').classList.add('visible');
+        }
+
+        async function editAccount(id) {
+            _editingAcctId = id;
+            document.getElementById('account-modal-title').textContent = 'Update Calendar Account';
+            await loadVaultCredentials();
+            const a = accounts.find(x => x.id === id);
+            if (a) {
+                document.getElementById('acc-name').value = a.name || '';
+                document.getElementById('acc-email').value = a.email || '';
+                document.getElementById('acc-caldav-url').value = a.caldav_url || '';
+                document.getElementById('acc-username').value = a.username || '';
+                document.getElementById('acc-password').value = '';
+                document.getElementById('acc-oauth-client-id').value = a.oauth_client_id || '';
+                document.getElementById('acc-oauth-client-secret').value = '';
+                document.getElementById('acc-color').value = a.color || '#7d6b96';
+                document.getElementById('vault-credential-select').value = a.vault_credential_id || '';
+                const isGoogle = a.provider === 'google';
+                document.getElementById('preset-select').value = isGoogle ? 'google' : '';
+                document.getElementById('caldav-fields').style.display = isGoogle ? 'none' : '';
+                document.getElementById('google-fields').style.display = isGoogle ? '' : 'none';
+            }
+            document.getElementById('account-modal').classList.add('visible');
+        }
+
+        function closeAccountSettings() { document.getElementById('account-modal').classList.remove('visible'); _editingAcctId = null; }
+
+        async function loadVaultCredentials() {
+            try {
+                const resp = await fetch('/apps/vault/api/credentials');
+                const data = await resp.json();
+                const sel = document.getElementById('vault-credential-select');
+                sel.innerHTML = '<option value="">— Create one on Vault app —</option>';
+                if (data.credentials) {
+                    data.credentials.forEach(function(c) {
+                        sel.innerHTML += '<option value="' + c.public_id + '">' + c.name + '</option>';
+                    });
+                }
+            } catch(e) {}
+        }
+
+        async function applyVaultCredential() {
+            const publicId = document.getElementById('vault-credential-select').value;
+            if (!publicId) return;
+            try {
+                const resp = await fetch('/apps/vault/api/credentials/' + publicId + '/secrets');
+                const secrets = await resp.json();
+                if (secrets.email) document.getElementById('acc-email').value = secrets.email;
+                if (secrets.username) document.getElementById('acc-username').value = secrets.username;
+                if (secrets.password) document.getElementById('acc-password').value = secrets.password;
+                if (secrets.caldav_url) document.getElementById('acc-caldav-url').value = secrets.caldav_url;
+                if (secrets.oauth_client_id) document.getElementById('acc-oauth-client-id').value = secrets.oauth_client_id;
+                if (secrets.oauth_client_secret) document.getElementById('acc-oauth-client-secret').value = secrets.oauth_client_secret;
+                if (secrets.name) document.getElementById('acc-name').value = secrets.name;
+            } catch(e) {}
+        }
+
+        async function saveAccount() {
+            const isGoogle = document.getElementById('preset-select').value === 'google';
+            const body = {
+                name: document.getElementById('acc-name').value,
+                provider: isGoogle ? 'google' : 'caldav',
+                email: document.getElementById('acc-email').value,
+                caldav_url: document.getElementById('acc-caldav-url').value,
+                username: document.getElementById('acc-username').value || document.getElementById('acc-email').value,
+                password: document.getElementById('acc-password').value,
+                oauth_client_id: document.getElementById('acc-oauth-client-id').value,
+                oauth_client_secret: document.getElementById('acc-oauth-client-secret').value,
+                color: document.getElementById('acc-color').value,
+                vault_credential_id: document.getElementById('vault-credential-select').value || '',
+            };
+            try {
+                var url = 'api/accounts';
+                var method = 'POST';
+                if (_editingAcctId) { url = 'api/accounts/' + _editingAcctId; method = 'PUT'; }
+                const resp = await fetch(url, {method: method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+                if (!resp.ok) { const e = await resp.json(); alert(e.error); return; }
+                const created = await resp.json();
+                closeAccountSettings();
+                await loadAccounts();
+                await loadCalendars();
+                if (isGoogle && !_editingAcctId && created.id) {
+                    authorizeGoogle(created.id);
+                }
+            } catch(e) { alert('Failed: ' + e.message); }
+        }
+
+        async function authorizeGoogle(accountId) {
+            try {
+                const resp = await fetch('api/oauth/' + accountId + '/start');
+                const data = await resp.json();
+                if (data.auth_url) window.open(data.auth_url, '_blank', 'width=500,height=600');
+            } catch(e) { alert('OAuth failed: ' + e.message); }
+        }
+
+        async function syncAll() {
+            try {
+                const resp = await fetch('api/sync', {method:'POST'});
+                const data = await resp.json();
+                if (data.error) throw new Error(data.error);
+                await loadAccounts();
+                await loadCalendars();
+                loadEvents();
+            } catch(e) {
+                alert('Sync error: ' + e.message);
+            }
+        }
+
+        function fmt(d) { return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+        function toLocalISO(d) { return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,16); }
+        function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+        document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeAccountSettings(); closeErrorModal(); } });
+
+        var urlEventId = new URLSearchParams(window.location.search).get('id');
+        if (urlEventId) setTimeout(function() { openModal(urlEventId); }, 500);
+    </script>
+
+<div id="confirm-modal" style="display:none;position:fixed;inset:0;z-index:100;">
+    <div id="confirm-modal-backdrop" style="position:absolute;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);"></div>
+    <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:1rem;">
+        <div style="background:var(--color-glass-base,#fff);border:1.5px solid var(--color-glass-border,rgba(139,117,169,0.35));border-radius:1rem;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.2);">
+            <div style="padding:1.5rem;">
+                <h3 id="confirm-modal-title" style="font-size:1.125rem;font-weight:600;color:var(--color-text-primary,#1a1625);margin:0 0 0.5rem 0;">Confirm</h3>
+                <p id="confirm-modal-message" style="font-size:0.875rem;color:var(--color-text-secondary,#4a3f5c);margin:0 0 1.5rem 0;">Are you sure?</p>
+                <div style="display:flex;gap:0.75rem;justify-content:flex-end;">
+                    <button id="confirm-modal-cancel" style="padding:0.5rem 1rem;border-radius:0.5rem;font-size:0.8125rem;font-weight:500;border:1px solid var(--color-glass-border,#ddd);background:var(--color-glass-base,#fff);color:var(--color-text-primary,#333);cursor:pointer;">Cancel</button>
+                    <button id="confirm-modal-confirm" style="padding:0.5rem 1rem;border-radius:0.5rem;font-size:0.8125rem;font-weight:500;border:none;background:var(--color-error,#e88b8b);color:white;cursor:pointer;">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+window.confirmModal={show:function(opts){return new Promise(function(resolve){
+    var m=document.getElementById('confirm-modal');
+    var bd=document.getElementById('confirm-modal-backdrop');
+    document.getElementById('confirm-modal-title').textContent=opts.title||'Confirm';
+    document.getElementById('confirm-modal-message').textContent=opts.message||'Are you sure?';
+    var cb=document.getElementById('confirm-modal-confirm');
+    cb.textContent=opts.confirmText||'Delete';
+    cb.style.background=(opts.confirmClass==='btn-primary')?'var(--color-accent,#7d6b96)':'var(--color-error,#e88b8b)';
+    m.style.display='block';
+    function close(v){m.style.display='none';resolve(v);bd.onclick=null;document.getElementById('confirm-modal-cancel').onclick=null;cb.onclick=null;}
+    bd.onclick=function(){close(false);};
+    document.getElementById('confirm-modal-cancel').onclick=function(){close(false);};
+    cb.onclick=function(){close(true);};
+});}};
+</script>
+</body>
+</html>
+{{end}}
