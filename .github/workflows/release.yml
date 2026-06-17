@@ -14,13 +14,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
 
       - name: Update localitas-go to latest
         run: |
           go get github.com/localitas/localitas-go@latest
           go mod tidy
-        with:
-          go-version-file: go.mod
 
       - name: Lint
         run: |
@@ -39,20 +39,19 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
 
       - name: Update localitas-go to latest
         run: |
           go get github.com/localitas/localitas-go@latest
           go mod tidy
-        with:
-          go-version-file: go.mod
 
       - name: Generate version
         id: version
         run: |
           VERSION="v0.1.$(git rev-list --count HEAD).$(date -u +%Y%m%d%H%M%S)"
           echo "tag=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
 
       - name: Build darwin/arm64
         run: |
