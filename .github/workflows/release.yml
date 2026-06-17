@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Lint
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+
+      - name: Test
+        run: go test -v ./...
+
+  release:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION="v0.1.$(git rev-list --count HEAD).$(date -u +%Y%m%d%H%M%S)"
+          echo "tag=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Build darwin/arm64
+        run: |
+          GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -trimpath -o dist/calendar-server-darwin-arm64 ./cmd/calendar-server
+
+      - name: Build darwin/amd64
+        run: |
+          GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-s -w -X main.version=${{ steps.version.outputs.tag }}" \
+            -trimpath -o dist/calendar-server-darwin-amd64 ./cmd/calendar-server
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            dist/calendar-server-darwin-arm64
+            dist/calendar-server-darwin-amd64
