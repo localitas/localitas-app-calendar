@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	syncAutomationName     = "Calendar CalDAV Sync"
-	reminderAutomationName = "Calendar Reminders"
+	syncAutomationName     = "Calendar: CalDAV Sync"
+	reminderAutomationName = "Calendar: Reminders"
 )
 
 func RegisterSyncAutomation(coreURL, token, appURL string) {
@@ -29,7 +29,7 @@ func registerSyncAutomation(coreURL, token, appURL string) {
 		"description": "Syncs events from all CalDAV calendar accounts every 30 minutes",
 		"dag_config": map[string]interface{}{
 			"dag_id":      "calendar_caldav_sync",
-			"name":        "Calendar CalDAV Sync",
+			"name":        "Calendar: CalDAV Sync",
 			"description": "Calls the calendar app sync endpoint",
 			"nodes": []map[string]interface{}{
 				{
@@ -96,7 +96,7 @@ func registerReminderAutomation(coreURL, token, appURL string) {
 		"description": "Checks for due calendar reminders every minute",
 		"dag_config": map[string]interface{}{
 			"dag_id":      "calendar_reminders_check",
-			"name":        "Calendar Reminders Check",
+			"name":        "Calendar: Reminders Check",
 			"description": "Calls the calendar app reminder check endpoint",
 			"nodes": []map[string]interface{}{
 				{
