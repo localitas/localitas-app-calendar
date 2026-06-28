@@ -1,6 +1,7 @@
 services:
   web:
     image: ghcr.io/localitas/localitas-app-calendar:latest
+    command: ["serve", "--listen", ":8000", "--base-path", "/apps/ext/calendar/"]
     ports:
       - "${APP_PORT:-9203}:8000"
     environment:
