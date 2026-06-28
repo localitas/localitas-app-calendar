@@ -1,0 +1,17 @@
+services:
+  web:
+    image: ghcr.io/localitas/localitas-app-calendar:latest
+    ports:
+      - "${APP_PORT:-9203}:8000"
+    environment:
+      - CORE_URL=http://host.docker.internal:8090
+      - LOCALITAS_API_TOKEN=${LOCALITAS_API_TOKEN:-}
+    labels:
+      localitas.app: "true"
+    restart: unless-stopped
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

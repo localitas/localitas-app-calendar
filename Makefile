@@ -1,6 +1,6 @@
 .PHONY: build test install uninstall start stop restart status logs logs-err \
        build-docker start-docker stop-docker restart-docker logs-docker \
-       lint strict-lint swagger
+       docker-push lint strict-lint swagger
 
 APP_NAME := calendar
 PORT ?= 9203
@@ -98,10 +98,20 @@ restart-docker: stop-docker start-docker
 logs-docker:
 	@docker logs -f calendar
 
+
 # ── Release ───────────────────────────────────────────────────
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+GHCR_IMAGE := ghcr.io/localitas/localitas-app-$(APP_NAME)
+
+docker-push: test build-docker
+	docker tag $(APP_NAME):latest $(GHCR_IMAGE):latest
+	docker tag $(APP_NAME):latest $(GHCR_IMAGE):$(VERSION)
+	docker push $(GHCR_IMAGE):latest
+	docker push $(GHCR_IMAGE):$(VERSION)
+	@echo "✅ Pushed $(GHCR_IMAGE):latest and $(GHCR_IMAGE):$(VERSION)"
+
 
 build-release: lint
 	@mkdir -p dist
