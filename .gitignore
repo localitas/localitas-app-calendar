@@ -3,3 +3,4 @@ bin/
 *-linux-arm64
 *-darwin-arm64
 dist/
+.DS_Store
