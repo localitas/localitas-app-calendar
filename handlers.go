@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/localitas/localitas-go"
+	"github.com/localitas/localitas-go/httputil"
 )
 
 type handler struct {
@@ -23,7 +24,7 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	if startStr != "" {
 		start, err = time.Parse("2006-01-02", startStr)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid start date")
+			writeErr(w, r, http.StatusBadRequest, "invalid start date")
 			return
 		}
 	} else {
@@ -33,7 +34,7 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	if endStr != "" {
 		end, err = time.Parse("2006-01-02", endStr)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid end date")
+			writeErr(w, r, http.StatusBadRequest, "invalid end date")
 			return
 		}
 		end = end.Add(24*time.Hour - time.Second)
@@ -43,21 +44,21 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 
 	days, err := h.app.CalDAV.GetEventsByDay(r.Context(), start, end)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to get events: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "failed to get events: %v", err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"days": days})
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{"days": days})
 }
 
 func (h *handler) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	e, err := h.app.CalDAV.GetEvent(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "event not found: %v", err)
+		writeErr(w, r, http.StatusNotFound, "event not found: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, r, http.StatusOK, e)
 }
 
 func (h *handler) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
@@ -72,11 +73,11 @@ func (h *handler) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		Timezone    string `json:"timezone"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		writeErr(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if req.Title == "" {
-		writeErr(w, http.StatusBadRequest, "title is required")
+		writeErr(w, r, http.StatusBadRequest, "title is required")
 		return
 	}
 
@@ -100,10 +101,10 @@ func (h *handler) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 
 	e, err := h.app.CalDAV.CreateEventJSON(r.Context(), req.CalendarID, req.Title, req.Description, req.Location, req.Timezone, startTime, endTime, req.AllDay)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to create event: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "failed to create event: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, e)
+	writeJSON(w, r, http.StatusCreated, e)
 }
 
 func (h *handler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +118,7 @@ func (h *handler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		Location    string `json:"location"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request body")
+		writeErr(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -126,47 +127,47 @@ func (h *handler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 
 	e, err := h.app.CalDAV.UpdateEventJSON(r.Context(), id, req.Title, req.Description, req.Location, startTime, endTime, req.AllDay)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, e)
+	writeJSON(w, r, http.StatusOK, e)
 }
 
 func (h *handler) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.app.CalDAV.DeleteEventJSON(r.Context(), id); err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to delete event: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "failed to delete event: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		writeErr(w, http.StatusBadRequest, "query parameter 'q' is required")
+		writeErr(w, r, http.StatusBadRequest, "query parameter 'q' is required")
 		return
 	}
 	events, err := h.app.CalDAV.SearchEvents(r.Context(), query, 20)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "search failed: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "search failed: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, events)
+	writeJSON(w, r, http.StatusOK, events)
 }
 
 func (h *handler) handleParseDate(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
 	if query == "" {
-		writeErr(w, http.StatusBadRequest, "query parameter 'q' is required")
+		writeErr(w, r, http.StatusBadRequest, "query parameter 'q' is required")
 		return
 	}
 	parsed, ok := ParseNaturalDate(query)
 	if !ok {
-		writeJSON(w, http.StatusOK, map[string]interface{}{"parsed": false, "input": query})
+		writeJSON(w, r, http.StatusOK, map[string]interface{}{"parsed": false, "input": query})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"parsed": true,
 		"input":  query,
 		"date":   parsed.Format("2006-01-02"),
@@ -178,10 +179,10 @@ func (h *handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := client.UserIDFromRequest(r)
 	accounts, err := h.app.Store.ListAccounts(r.Context(), userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, accounts)
+	writeJSON(w, r, http.StatusOK, accounts)
 }
 
 func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +199,7 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		VaultCredentialID string `json:"vault_credential_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if req.Provider == "" {
@@ -208,7 +209,7 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if req.VaultCredentialID != "" && h.app.client != nil {
 		secrets, err := h.app.client.WithToken(client.TokenFromRequest(r)).VaultGetSecrets(r.Context(), req.VaultCredentialID)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "failed to resolve vault credential: %v", err)
+			writeErr(w, r, http.StatusBadRequest, "failed to resolve vault credential: %v", err)
 			return
 		}
 		if req.Username == "" {
@@ -233,12 +234,12 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 
 	if req.Provider == "google" {
 		if req.Email == "" || req.OAuthClientID == "" || req.OAuthClientSecret == "" {
-			writeErr(w, http.StatusBadRequest, "email, oauth_client_id, oauth_client_secret required for Google")
+			writeErr(w, r, http.StatusBadRequest, "email, oauth_client_id, oauth_client_secret required for Google")
 			return
 		}
 	} else {
 		if req.CalDAVURL == "" || req.Username == "" || req.Password == "" {
-			writeErr(w, http.StatusBadRequest, "caldav_url, username, password are required")
+			writeErr(w, r, http.StatusBadRequest, "caldav_url, username, password are required")
 			return
 		}
 	}
@@ -248,10 +249,10 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	userID := client.UserIDFromRequest(r)
 	account, err := h.app.Store.CreateAccount(r.Context(), userID, req.Name, req.Provider, req.Email, req.CalDAVURL, req.Username, req.Password, req.OAuthClientID, req.OAuthClientSecret, req.Color, req.VaultCredentialID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, account)
+	writeJSON(w, r, http.StatusCreated, account)
 }
 
 func (h *handler) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
@@ -267,27 +268,27 @@ func (h *handler) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		VaultCredentialID string `json:"vault_credential_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if err := h.app.Store.UpdateAccount(r.Context(), id, req.Name, req.Provider, req.Email, req.CalDAVURL, req.Username, req.Password, req.Color, req.VaultCredentialID); err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	h.app.Store.DeleteAccount(r.Context(), id)
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	account, err := h.app.Store.GetAccount(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+		writeErr(w, r, http.StatusNotFound, "account not found")
 		return
 	}
 
@@ -297,12 +298,12 @@ func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 	newCount, err := SyncAccount(r.Context(), h.app.Store, account, from, to)
 	if err != nil {
 		h.app.Store.UpdateSyncStatus(r.Context(), id, err.Error())
-		writeErr(w, http.StatusInternalServerError, "sync failed: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "sync failed: %v", err)
 		return
 	}
 
 	h.app.Store.UpdateSyncStatus(r.Context(), id, "")
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"new_events": newCount,
 	})
 }
@@ -311,7 +312,7 @@ func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
 	userID := client.UserIDFromRequest(r)
 	accounts, err := h.app.Store.ListAccounts(r.Context(), userID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
 
@@ -334,7 +335,7 @@ func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
 		totalNew += n
 	}
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"new_events": totalNew,
 		"errors":     syncErrors,
 	})
@@ -359,29 +360,29 @@ func (h *handler) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("id")
 	account, err := h.app.Store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+		writeErr(w, r, http.StatusNotFound, "account not found")
 		return
 	}
 	if account.OAuthClientID == "" {
-		writeErr(w, http.StatusBadRequest, "no OAuth client ID configured")
+		writeErr(w, r, http.StatusBadRequest, "no OAuth client ID configured")
 		return
 	}
 	redirectURI := h.oauthRedirectURI(r)
 	authURL := GoogleAuthRedirectURL(account.OAuthClientID, redirectURI, accountID)
-	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL, "redirect_uri": redirectURI})
+	writeJSON(w, r, http.StatusOK, map[string]string{"auth_url": authURL, "redirect_uri": redirectURI})
 }
 
 func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	accountID := r.URL.Query().Get("state")
 	if code == "" || accountID == "" {
-		writeErr(w, http.StatusBadRequest, "missing code or state")
+		writeErr(w, r, http.StatusBadRequest, "missing code or state")
 		return
 	}
 
 	account, err := h.app.Store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "account not found")
+		writeErr(w, r, http.StatusNotFound, "account not found")
 		return
 	}
 
@@ -413,10 +414,10 @@ func (h *handler) handleListCalendars(w http.ResponseWriter, r *http.Request) {
 		calendars, err = h.app.Store.ListAllCalendars(r.Context())
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, calendars)
+	writeJSON(w, r, http.StatusOK, calendars)
 }
 
 func (h *handler) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
@@ -426,7 +427,7 @@ func (h *handler) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 		IsVisible *bool  `json:"is_visible"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if req.Color != "" {
@@ -435,7 +436,7 @@ func (h *handler) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 	if req.IsVisible != nil {
 		h.app.Store.UpdateCalendarVisibility(r.Context(), id, *req.IsVisible)
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleAddReminder(w http.ResponseWriter, r *http.Request) {
@@ -444,7 +445,7 @@ func (h *handler) handleAddReminder(w http.ResponseWriter, r *http.Request) {
 		MinutesBefore int `json:"minutes_before"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if req.MinutesBefore <= 0 {
@@ -452,50 +453,50 @@ func (h *handler) handleAddReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	reminder, err := h.app.Store.AddReminder(r.Context(), eventID, req.MinutesBefore)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "failed to add reminder: %v", err)
+		writeErr(w, r, http.StatusInternalServerError, "failed to add reminder: %v", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, reminder)
+	writeJSON(w, r, http.StatusCreated, reminder)
 }
 
 func (h *handler) handleListReminders(w http.ResponseWriter, r *http.Request) {
 	eventID := r.PathValue("id")
 	reminders, err := h.app.Store.ListReminders(r.Context(), eventID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, reminders)
+	writeJSON(w, r, http.StatusOK, reminders)
 }
 
 func (h *handler) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("rid")
 	if err := h.app.Store.DeleteReminder(r.Context(), id); err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handlePendingReminders(w http.ResponseWriter, r *http.Request) {
 	pending, err := h.app.Store.GetPendingReminders(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pending)
+	writeJSON(w, r, http.StatusOK, pending)
 }
 
 func (h *handler) handleCheckReminders(w http.ResponseWriter, r *http.Request) {
 	pending, err := h.app.Store.GetPendingReminders(r.Context())
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
 	for _, p := range pending {
 		h.app.Store.MarkReminderNotified(r.Context(), p.ReminderID)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"checked":   len(pending),
 		"reminders": pending,
 	})
@@ -507,7 +508,7 @@ func (h *handler) handleSetReminders(w http.ResponseWriter, r *http.Request) {
 		MinutesBefore []int `json:"minutes_before"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid body")
+		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
 	existing, _ := h.app.Store.ListReminders(r.Context(), eventID)
@@ -525,25 +526,25 @@ func (h *handler) handleSetReminders(w http.ResponseWriter, r *http.Request) {
 		}
 		reminders = append(reminders, rem)
 	}
-	writeJSON(w, http.StatusOK, reminders)
+	writeJSON(w, r, http.StatusOK, reminders)
 }
 
 func (h *handler) handleListEventReminders(w http.ResponseWriter, r *http.Request) {
 	eventID := r.URL.Query().Get("event_id")
 	if eventID == "" {
-		writeErr(w, http.StatusBadRequest, "event_id required")
+		writeErr(w, r, http.StatusBadRequest, "event_id required")
 		return
 	}
 	reminders, err := h.app.Store.ListReminders(r.Context(), eventID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
 	mins := make([]int, 0, len(reminders))
 	for _, r := range reminders {
 		mins = append(mins, r.MinutesBefore)
 	}
-	writeJSON(w, http.StatusOK, map[string]interface{}{"minutes_before": mins})
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{"minutes_before": mins})
 }
 
 func (h *handler) handleBulkReminders(w http.ResponseWriter, r *http.Request) {
@@ -560,7 +561,7 @@ func (h *handler) handleBulkReminders(w http.ResponseWriter, r *http.Request) {
 		}
 		result[eid] = mins
 	}
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, r, http.StatusOK, result)
 }
 
 func (h *handler) handleCheckConflicts(w http.ResponseWriter, r *http.Request) {
@@ -568,39 +569,35 @@ func (h *handler) handleCheckConflicts(w http.ResponseWriter, r *http.Request) {
 	endStr := r.URL.Query().Get("end")
 	excludeID := r.URL.Query().Get("exclude_id")
 	if startStr == "" || endStr == "" {
-		writeErr(w, http.StatusBadRequest, "start and end are required")
+		writeErr(w, r, http.StatusBadRequest, "start and end are required")
 		return
 	}
 	start, err := time.Parse(time.RFC3339, startStr)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid start")
+		writeErr(w, r, http.StatusBadRequest, "invalid start")
 		return
 	}
 	end, err := time.Parse(time.RFC3339, endStr)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid end")
+		writeErr(w, r, http.StatusBadRequest, "invalid end")
 		return
 	}
 	conflicts, err := h.app.Store.GetConflictingEvents(r.Context(), start, end, excludeID)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "%v", err)
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, conflicts)
+	writeJSON(w, r, http.StatusOK, conflicts)
 }
 
 func (h *handler) handleListPresets(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, CalDAVPresets)
+	writeJSON(w, r, http.StatusOK, CalDAVPresets)
 }
 
-func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v interface{}) {
+	httputil.WriteResponse(w, r, status, v)
 }
 
-func writeErr(w http.ResponseWriter, status int, format string, args ...interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{"error": fmt.Sprintf(format, args...)})
+func writeErr(w http.ResponseWriter, r *http.Request, status int, format string, args ...interface{}) {
+	httputil.WriteError(w, r, status, format, args...)
 }
