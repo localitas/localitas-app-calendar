@@ -3,12 +3,14 @@ package calendar
 import (
 	"context"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/localitas/localitas-go"
 )
+
+var logger = slog.Default().With("component", "calendar")
 
 type App struct {
 	Store          *Store
@@ -48,12 +50,12 @@ func (a *App) Install(ctx context.Context) (string, error) {
 	for attempt := 1; ; attempt++ {
 		db, err := a.client.CreateSystemDatabase(ctx, DatabaseName)
 		if err != nil {
-			log.Printf("install: attempt %d failed (retrying): %v", attempt, err)
+			logger.Warn("install attempt failed", "attempt", attempt, "error", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 		if err := applyEmbeddedMigrations(ctx, a.client, db.ID); err != nil {
-			log.Printf("install: migrations attempt %d failed (retrying): %v", attempt, err)
+			logger.Warn("install migrations attempt failed", "attempt", attempt, "error", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
@@ -64,7 +66,7 @@ func (a *App) Install(ctx context.Context) (string, error) {
 func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	tmpl, err := template.ParseFS(TemplatesFS, "templates/index.html")
 	if err != nil {
-		log.Printf("calendar index template error: %v", err)
+		logger.Error("index template error", "error", err)
 		http.Error(w, "template error", http.StatusInternalServerError)
 		return
 	}
@@ -72,7 +74,7 @@ func (a *App) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	data := map[string]string{"BasePath": a.BasePath}
 	if err := tmpl.ExecuteTemplate(w, "index.html", data); err != nil {
-		log.Printf("calendar index render error: %v", err)
+		logger.Error("index render error", "error", err)
 	}
 }
 

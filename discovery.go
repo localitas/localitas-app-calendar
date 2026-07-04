@@ -3,7 +3,6 @@ package calendar
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/grandcat/zeroconf"
@@ -41,6 +40,6 @@ func BroadcastMDNS(port int, name string) (shutdown func(), err error) {
 	if err != nil {
 		return nil, fmt.Errorf("mDNS register: %w", err)
 	}
-	log.Printf("Broadcasting mDNS: %s on port %d (%s)", AppServiceType, port, name)
+	logger.Info("broadcasting mDNS", "service_type", AppServiceType, "port", port, "name", name)
 	return server.Shutdown, nil
 }

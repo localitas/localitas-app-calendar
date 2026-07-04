@@ -3,7 +3,6 @@ package calendar
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 )
@@ -20,7 +19,7 @@ func RegisterSyncAutomation(coreURL, token, appURL string) {
 
 func registerSyncAutomation(coreURL, token, appURL string) {
 	if automationExists(coreURL, token, syncAutomationName) {
-		log.Printf("✅ Calendar sync automation already registered (user config preserved)")
+		logger.Info("calendar sync automation already registered")
 		return
 	}
 
@@ -62,7 +61,7 @@ func registerSyncAutomation(coreURL, token, appURL string) {
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", coreURL+"/apps/automation/api/automations", bytes.NewReader(b))
 	if err != nil {
-		log.Printf("⚠️  Failed to create calendar automation request: %v", err)
+		logger.Error("failed to create calendar automation request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -73,21 +72,21 @@ func registerSyncAutomation(coreURL, token, appURL string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("⚠️  Failed to register calendar sync automation: %v", err)
+		logger.Error("failed to register calendar sync automation", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		log.Printf("✅ Registered calendar sync automation (every 30 min)")
+		logger.Info("registered calendar sync automation", "interval", "every 30 min")
 	} else {
-		log.Printf("⚠️  Calendar automation registration returned %d", resp.StatusCode)
+		logger.Warn("calendar automation registration returned unexpected status", "status", resp.StatusCode)
 	}
 }
 
 func registerReminderAutomation(coreURL, token, appURL string) {
 	if automationExists(coreURL, token, reminderAutomationName) {
-		log.Printf("✅ Calendar reminder automation already registered")
+		logger.Info("calendar reminder automation already registered")
 		return
 	}
 
@@ -127,7 +126,7 @@ func registerReminderAutomation(coreURL, token, appURL string) {
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", coreURL+"/apps/automation/api/automations", bytes.NewReader(b))
 	if err != nil {
-		log.Printf("⚠️  Failed to create reminder automation request: %v", err)
+		logger.Error("failed to create reminder automation request", "error", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -138,15 +137,15 @@ func registerReminderAutomation(coreURL, token, appURL string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("⚠️  Failed to register reminder automation: %v", err)
+		logger.Error("failed to register reminder automation", "error", err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK {
-		log.Printf("✅ Registered calendar reminder automation (every minute)")
+		logger.Info("registered calendar reminder automation", "interval", "every minute")
 	} else {
-		log.Printf("⚠️  Calendar reminder automation registration returned %d", resp.StatusCode)
+		logger.Warn("calendar reminder automation registration returned unexpected status", "status", resp.StatusCode)
 	}
 }
 
