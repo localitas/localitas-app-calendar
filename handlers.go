@@ -1,6 +1,7 @@
 package calendar
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -308,12 +309,10 @@ func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
-	userID := client.UserIDFromRequest(r)
-	accounts, err := h.app.Store.ListAccounts(r.Context(), userID)
+func (h *handler) doSyncAll(ctx context.Context, userID string) (map[string]interface{}, error) {
+	accounts, err := h.app.Store.ListAccounts(ctx, userID)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
-		return
+		return nil, err
 	}
 
 	from := time.Now().AddDate(0, -1, 0)
@@ -325,20 +324,39 @@ func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
 		if !a.IsActive {
 			continue
 		}
-		n, err := SyncAccount(r.Context(), h.app.Store, a, from, to)
+		n, err := SyncAccount(ctx, h.app.Store, a, from, to)
 		if err != nil {
-			h.app.Store.UpdateSyncStatus(r.Context(), a.ID, err.Error())
+			h.app.Store.UpdateSyncStatus(ctx, a.ID, err.Error())
 			syncErrors = append(syncErrors, a.Name+": "+err.Error())
 			continue
 		}
-		h.app.Store.UpdateSyncStatus(r.Context(), a.ID, "")
+		h.app.Store.UpdateSyncStatus(ctx, a.ID, "")
 		totalNew += n
 	}
 
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{
+	return map[string]interface{}{
 		"new_events": totalNew,
 		"errors":     syncErrors,
-	})
+	}, nil
+}
+
+func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
+	userID := client.UserIDFromRequest(r)
+
+	work := func(ctx context.Context) (map[string]interface{}, error) {
+		return h.doSyncAll(ctx, userID)
+	}
+
+	if client.RunAsync(w, r, h.app.client, work) {
+		return
+	}
+
+	result, err := h.doSyncAll(r.Context(), userID)
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, result)
 }
 
 func (h *handler) oauthRedirectURI(r *http.Request) string {
@@ -488,18 +506,30 @@ func (h *handler) handlePendingReminders(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *handler) handleCheckReminders(w http.ResponseWriter, r *http.Request) {
-	pending, err := h.app.Store.GetPendingReminders(r.Context())
+	work := func(ctx context.Context) (map[string]interface{}, error) {
+		pending, err := h.app.Store.GetPendingReminders(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range pending {
+			h.app.Store.MarkReminderNotified(ctx, p.ReminderID)
+		}
+		return map[string]interface{}{
+			"checked":   len(pending),
+			"reminders": pending,
+		}, nil
+	}
+
+	if client.RunAsync(w, r, h.app.client, work) {
+		return
+	}
+
+	result, err := work(r.Context())
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
 	}
-	for _, p := range pending {
-		h.app.Store.MarkReminderNotified(r.Context(), p.ReminderID)
-	}
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{
-		"checked":   len(pending),
-		"reminders": pending,
-	})
+	writeJSON(w, r, http.StatusOK, result)
 }
 
 func (h *handler) handleSetReminders(w http.ResponseWriter, r *http.Request) {
