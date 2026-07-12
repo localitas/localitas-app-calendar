@@ -1,6 +1,6 @@
 module github.com/localitas/localitas-app-calendar
 
-go 1.26.3
+go 1.26.5
 
 require (
 	github.com/emersion/go-ical v0.0.0-20250609112844-439c63cef608
