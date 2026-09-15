@@ -12,6 +12,13 @@ import (
 	ical "github.com/emersion/go-ical"
 )
 
+// caldavHTTPClient is a single pooled client shared by every CalDAVClient
+// wrapper. The wrapper is legitimately per-calendar (it carries the calendar URL
+// + credentials), but the underlying *http.Client (a connection pool) is created
+// once here and shared, instead of a fresh transport per calendar per sync.
+// http.Client is safe for concurrent use.
+var caldavHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 type CalDAVClient struct {
 	baseURL     string
 	username    string
@@ -25,7 +32,7 @@ func NewCalDAVClient(baseURL, username, password string) *CalDAVClient {
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		username: username,
 		password: password,
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   caldavHTTPClient,
 	}
 }
 
@@ -33,7 +40,7 @@ func NewCalDAVClientWithBearer(baseURL, bearerToken string) *CalDAVClient {
 	return &CalDAVClient{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		bearerToken: bearerToken,
-		client:      &http.Client{Timeout: 30 * time.Second},
+		client:      caldavHTTPClient,
 	}
 }
 

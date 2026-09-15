@@ -20,6 +20,14 @@ const (
 	googleScopes    = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 )
 
+// googleOAuthClient is a single pooled client shared by the Google OAuth token
+// exchange/refresh and calendar discovery, created once instead of per call
+// (refresh + discovery run during each account sync). Each call bounds itself
+// with a context deadline.
+var googleOAuthClient = &http.Client{}
+
+const googleOAuthTimeout = 10 * time.Second
+
 func GoogleAuthRedirectURL(clientID, redirectURI, state string) string {
 	params := url.Values{
 		"client_id":     {clientID},
@@ -49,13 +57,15 @@ func ExchangeGoogleCode(ctx context.Context, code, clientID, clientSecret, redir
 		"grant_type":    {"authorization_code"},
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, googleOAuthTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", googleTokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := googleOAuthClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -81,13 +91,15 @@ func RefreshGoogleToken(ctx context.Context, refreshToken, clientID, clientSecre
 		"grant_type":    {"refresh_token"},
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, googleOAuthTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", googleTokenURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := googleOAuthClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -119,13 +131,15 @@ type googleCalendarListResponse struct {
 }
 
 func DiscoverGoogleCalendars(ctx context.Context, accessToken string) ([]calDAVCalendar, error) {
+	ctx, cancel := context.WithTimeout(ctx, googleOAuthTimeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://www.googleapis.com/calendar/v3/users/me/calendarList", nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	resp, err := googleOAuthClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
