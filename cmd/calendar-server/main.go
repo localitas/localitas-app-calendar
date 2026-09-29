@@ -81,6 +81,12 @@ func serveAction(ctx context.Context, cmd *cli.Command) error {
 	token := cmd.String("token")
 	c := newClient(cmd)
 
+	// Account passwords, OAuth client secrets and tokens are stored encrypted;
+	// refuse to start without a key rather than failing on the first write.
+	if err := client.RequireSecretKey(); err != nil {
+		return fmt.Errorf("encryption key: %w", err)
+	}
+
 	a := calendar.New(c, basePath)
 
 	dbID, err := a.Install(ctx)

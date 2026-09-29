@@ -41,9 +41,15 @@ func (s *Store) CreateAccount(ctx context.Context, userID, name, provider, email
 	if color == "" {
 		color = "#7d6b96"
 	}
-	encPass, _ := client.Encrypt(password)
-	encSecret, _ := client.Encrypt(oauthClientSecret)
-	_, err := s.db.ExecContext(ctx,
+	encPass, err := client.Encrypt(password)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt password: %w", err)
+	}
+	encSecret, err := client.Encrypt(oauthClientSecret)
+	if err != nil {
+		return nil, fmt.Errorf("encrypt oauth_client_secret: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO accounts (id, user_id, name, provider, email, caldav_url, username, password, oauth_client_id, oauth_client_secret, color, vault_credential_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
 		id, userID, name, provider, email, caldavURL, username, encPass, oauthClientID, encSecret, color, vaultCredentialID, now, now)
 	if err != nil {
@@ -92,17 +98,32 @@ func (s *Store) GetAccount(ctx context.Context, id string) (*CalendarAccount, er
 	a.LastSyncedAt = lastSynced
 	a.CreatedAt = time.Unix(createdAt, 0)
 	a.UpdatedAt = time.Unix(updatedAt, 0)
-	a.Password, _ = client.Decrypt(a.Password)
-	a.OAuthClientSecret, _ = client.Decrypt(a.OAuthClientSecret)
+	if a.Password, err = client.Decrypt(a.Password); err != nil {
+		return nil, fmt.Errorf("decrypt password: %w", err)
+	}
+	if a.OAuthClientSecret, err = client.Decrypt(a.OAuthClientSecret); err != nil {
+		return nil, fmt.Errorf("decrypt oauth_client_secret: %w", err)
+	}
 	return &a, nil
 }
 
 func (s *Store) UpdateAccount(ctx context.Context, id, name, provider, email, caldavURL, username, password, color, vaultCredentialID string) error {
 	now := time.Now().UTC().Unix()
-	encPass, _ := client.Encrypt(password)
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE accounts SET name=?, provider=?, email=?, caldav_url=?, username=?, password=?, color=?, vault_credential_id=?, updated_at=? WHERE id=?`,
-		name, provider, email, caldavURL, username, encPass, color, vaultCredentialID, now, id)
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE accounts SET name=?, provider=?, email=?, caldav_url=?, username=?, color=?, vault_credential_id=?, updated_at=? WHERE id=?`,
+		name, provider, email, caldavURL, username, color, vaultCredentialID, now, id); err != nil {
+		return err
+	}
+	// An update that omits the password keeps the stored one; writing
+	// Encrypt("") would silently blank it.
+	if password == "" {
+		return nil
+	}
+	encPass, err := client.Encrypt(password)
+	if err != nil {
+		return fmt.Errorf("encrypt password: %w", err)
+	}
+	_, err = s.db.ExecContext(ctx, `UPDATE accounts SET password=? WHERE id=?`, encPass, id)
 	return err
 }
 

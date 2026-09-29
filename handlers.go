@@ -2,8 +2,11 @@ package calendar
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"time"
 
@@ -303,7 +306,7 @@ func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	account, err := h.app.Store.GetAccount(r.Context(), id)
 	if err != nil {
-		writeErr(w, r, http.StatusNotFound, "account not found")
+		writeAccountErr(w, r, err)
 		return
 	}
 
@@ -392,7 +395,7 @@ func (h *handler) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("id")
 	account, err := h.app.Store.GetAccount(r.Context(), accountID)
 	if err != nil {
-		writeErr(w, r, http.StatusNotFound, "account not found")
+		writeAccountErr(w, r, err)
 		return
 	}
 	if account.OAuthClientID == "" {
@@ -412,17 +415,18 @@ func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	account, err := h.app.Store.GetAccount(r.Context(), accountID)
+	// Load WITH tokens: when Google omits refresh_token on re-consent, the
+	// stored one is kept instead of being overwritten with "".
+	account, err := h.app.Store.GetAccountWithTokens(r.Context(), accountID)
 	if err != nil {
-		writeErr(w, r, http.StatusNotFound, "account not found")
+		writeAccountErr(w, r, err)
 		return
 	}
 
 	redirectURI := h.oauthRedirectURI(r)
 	tok, err := ExchangeGoogleCode(r.Context(), code, account.OAuthClientID, account.OAuthClientSecret, redirectURI)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/html")
-		fmt.Fprintf(w, `<html><body><h3>Authorization Failed</h3><p>%s</p><script>setTimeout(function(){window.close();},3000);</script></body></html>`, err.Error())
+		writeOAuthPage(w, "Authorization Failed", err.Error(), 3000)
 		return
 	}
 
@@ -430,10 +434,11 @@ func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if refreshToken == "" {
 		refreshToken = account.RefreshToken
 	}
-	h.app.Store.SaveOAuthTokens(r.Context(), accountID, tok.AccessToken, refreshToken, tok.ExpiresIn)
-
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<html><body><h3>Google Calendar Connected!</h3><p>You can close this window.</p><script>setTimeout(function(){window.close();},2000);</script></body></html>`)
+	if err := h.app.Store.SaveOAuthTokens(r.Context(), accountID, tok.AccessToken, refreshToken, tok.ExpiresIn); err != nil {
+		writeOAuthPage(w, "Authorization Failed", "could not save tokens: "+err.Error(), 3000)
+		return
+	}
+	writeOAuthPage(w, "Google Calendar Connected!", "You can close this window.", 2000)
 }
 
 func (h *handler) handleListCalendars(w http.ResponseWriter, r *http.Request) {
@@ -644,4 +649,22 @@ func writeJSON(w http.ResponseWriter, r *http.Request, status int, v interface{}
 
 func writeErr(w http.ResponseWriter, r *http.Request, status int, format string, args ...interface{}) {
 	httputil.WriteError(w, r, status, format, args...)
+}
+
+// writeAccountErr reports a failed account load: 404 only when the account
+// doesn't exist. Any other error (e.g. a secret that can't be decrypted) is a
+// 500 carrying the real cause, never disguised as "account not found".
+func writeAccountErr(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		writeErr(w, r, http.StatusNotFound, "account not found")
+		return
+	}
+	writeErr(w, r, http.StatusInternalServerError, "load account: %v", err)
+}
+
+// writeOAuthPage renders the small popup page the OAuth flow lands on.
+func writeOAuthPage(w http.ResponseWriter, title, message string, closeAfterMs int) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<html><body><h3>%s</h3><p>%s</p><script>setTimeout(function(){window.close();},%d);</script></body></html>`,
+		html.EscapeString(title), html.EscapeString(message), closeAfterMs)
 }

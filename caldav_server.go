@@ -221,8 +221,10 @@ func (b *CalDAVBackend) CreateEventJSON(ctx context.Context, calendarID, title, 
 
 		storedCal, _ := b.store.GetCalendar(ctx, calendarID)
 		if storedCal != nil {
-			account, _ := b.store.GetAccount(ctx, storedCal.AccountID)
-			if account != nil {
+			account, err := b.store.GetAccount(ctx, storedCal.AccountID)
+			if err != nil {
+				logger.Error("remote sync skipped: cannot load account", "account_id", storedCal.AccountID, "error", err)
+			} else {
 				syncEventToRemote(ctx, b.store, account, storedCal, uid, title, description, location, start, end, allDay)
 			}
 		}
@@ -259,8 +261,10 @@ func (b *CalDAVBackend) UpdateEventJSON(ctx context.Context, id, title, descript
 	if existing.RemoteUID != "" && existing.CalendarID != "" {
 		storedCal, _ := b.store.GetCalendar(ctx, existing.CalendarID)
 		if storedCal != nil {
-			account, _ := b.store.GetAccount(ctx, storedCal.AccountID)
-			if account != nil {
+			account, err := b.store.GetAccount(ctx, storedCal.AccountID)
+			if err != nil {
+				logger.Error("remote sync skipped: cannot load account", "account_id", storedCal.AccountID, "error", err)
+			} else {
 				syncEventToRemote(ctx, b.store, account, storedCal, existing.RemoteUID, title, description, location, start, end, allDay)
 			}
 		}
@@ -277,7 +281,9 @@ func (b *CalDAVBackend) DeleteEventJSON(ctx context.Context, id string) error {
 
 	if existing.RemoteUID != "" && existing.CalendarID != "" {
 		caldavClient, err := getCalDAVClientForEvent(ctx, b.store, existing)
-		if err == nil && caldavClient != nil {
+		if err != nil {
+			logger.Error("remote delete skipped", "event_id", existing.ID, "error", err)
+		} else if caldavClient != nil {
 			caldavClient.DeleteEvent(ctx, existing.RemoteUID)
 		}
 
