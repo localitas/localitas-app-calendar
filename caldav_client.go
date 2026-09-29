@@ -440,7 +440,7 @@ func getCalDAVClientForEvent(ctx context.Context, store *Store, event *Event) (*
 	}
 	account, err := store.GetAccount(ctx, cal.AccountID)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("load account %s: %w", cal.AccountID, err)
 	}
 	if account.NeedsOAuth() {
 		fullAcct, err := store.GetAccountWithTokens(ctx, account.ID)
