@@ -2,7 +2,6 @@ package calendar
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -46,7 +45,7 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		end = time.Now().AddDate(0, 0, 14)
 	}
 
-	days, err := h.app.CalDAV.GetEventsByDay(r.Context(), start, end)
+	days, err := h.app.CalDAV.GetEventsByDay(r.Context(), client.GetUserID(r.Context()), start, end)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "failed to get events: %v", err)
 		return
@@ -57,9 +56,9 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	e, err := h.app.CalDAV.GetEvent(r.Context(), id)
+	e, err := h.app.CalDAV.GetEvent(r.Context(), client.GetUserID(r.Context()), id)
 	if err != nil {
-		writeErr(w, r, http.StatusNotFound, "event not found: %v", err)
+		writeStoreErr(w, r, "event", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, e)
@@ -103,9 +102,9 @@ func (h *handler) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		endTime = startTime.Add(time.Hour)
 	}
 
-	e, err := h.app.CalDAV.CreateEventJSON(r.Context(), req.CalendarID, req.Title, req.Description, req.Location, req.Timezone, startTime, endTime, req.AllDay)
+	e, err := h.app.CalDAV.CreateEventJSON(r.Context(), client.GetUserID(r.Context()), req.CalendarID, req.Title, req.Description, req.Location, req.Timezone, startTime, endTime, req.AllDay)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "failed to create event: %v", err)
+		writeStoreErr(w, r, "calendar", err)
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, e)
@@ -129,9 +128,9 @@ func (h *handler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 	startTime, _ := time.Parse(time.RFC3339, req.StartTime)
 	endTime, _ := time.Parse(time.RFC3339, req.EndTime)
 
-	e, err := h.app.CalDAV.UpdateEventJSON(r.Context(), id, req.Title, req.Description, req.Location, startTime, endTime, req.AllDay)
+	e, err := h.app.CalDAV.UpdateEventJSON(r.Context(), client.GetUserID(r.Context()), id, req.Title, req.Description, req.Location, startTime, endTime, req.AllDay)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		writeStoreErr(w, r, "event", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, e)
@@ -139,8 +138,8 @@ func (h *handler) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := h.app.CalDAV.DeleteEventJSON(r.Context(), id); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "failed to delete event: %v", err)
+	if err := h.app.CalDAV.DeleteEventJSON(r.Context(), client.GetUserID(r.Context()), id); err != nil {
+		writeStoreErr(w, r, "event", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
@@ -152,7 +151,7 @@ func (h *handler) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "query parameter 'q' is required")
 		return
 	}
-	events, err := h.app.CalDAV.SearchEvents(r.Context(), query, 20)
+	events, err := h.app.CalDAV.SearchEvents(r.Context(), client.GetUserID(r.Context()), query, 20)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "search failed: %v", err)
 		return
@@ -180,7 +179,7 @@ func (h *handler) handleParseDate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleListAccounts(w http.ResponseWriter, r *http.Request) {
-	userID := client.UserIDFromRequest(r)
+	userID := client.GetUserID(r.Context())
 	accounts, err := h.app.Store.ListAccounts(r.Context(), userID)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
@@ -255,7 +254,7 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" {
 		req.Name = req.Email
 	}
-	userID := client.UserIDFromRequest(r)
+	userID := client.GetUserID(r.Context())
 	account, err := h.app.Store.CreateAccount(r.Context(), userID, req.Name, req.Provider, req.Email, req.CalDAVURL, req.Username, req.Password, req.OAuthClientID, req.OAuthClientSecret, req.Color, req.VaultCredentialID)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
@@ -265,7 +264,7 @@ func (h *handler) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	// account works immediately without the interactive OAuth flow. expiresIn=0
 	// forces a refresh on first use, which mints a fresh access token.
 	if seededRefreshToken != "" {
-		if err := h.app.Store.SaveOAuthTokens(r.Context(), account.ID, "", seededRefreshToken, 0); err != nil {
+		if err := h.app.Store.SaveOAuthTokens(r.Context(), userID, account.ID, "", seededRefreshToken, 0); err != nil {
 			writeErr(w, r, http.StatusInternalServerError, "account created but failed to save seeded token: %v", err)
 			return
 		}
@@ -289,8 +288,8 @@ func (h *handler) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if err := h.app.Store.UpdateAccount(r.Context(), id, req.Name, req.Provider, req.Email, req.CalDAVURL, req.Username, req.Password, req.Color, req.VaultCredentialID); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+	if err := h.app.Store.UpdateAccount(r.Context(), client.GetUserID(r.Context()), id, req.Name, req.Provider, req.Email, req.CalDAVURL, req.Username, req.Password, req.Color, req.VaultCredentialID); err != nil {
+		writeStoreErr(w, r, "account", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
@@ -298,77 +297,91 @@ func (h *handler) handleUpdateAccount(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) handleDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	h.app.Store.DeleteAccount(r.Context(), id)
+	if err := h.app.Store.DeleteAccount(r.Context(), client.GetUserID(r.Context()), id); err != nil {
+		writeStoreErr(w, r, "account", err)
+		return
+	}
 	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	account, err := h.app.Store.GetAccount(r.Context(), id)
+	account, err := h.app.Store.GetAccount(r.Context(), client.GetUserID(r.Context()), r.PathValue("id"))
 	if err != nil {
-		writeAccountErr(w, r, err)
+		writeStoreErr(w, r, "account", err)
 		return
 	}
-
-	from := time.Now().AddDate(0, -1, 0)
-	to := time.Now().AddDate(0, 3, 0)
-
-	newCount, err := SyncAccount(r.Context(), h.app.Store, account, from, to)
+	newCount, err := h.syncAccount(r.Context(), account)
 	if err != nil {
-		h.app.Store.UpdateSyncStatus(r.Context(), id, err.Error())
 		writeErr(w, r, http.StatusInternalServerError, "sync failed: %v", err)
 		return
 	}
-
-	h.app.Store.UpdateSyncStatus(r.Context(), id, "")
 	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"new_events": newCount,
 	})
 }
 
-func (h *handler) doSyncAll(ctx context.Context, userID string) (map[string]interface{}, error) {
-	accounts, err := h.app.Store.ListAccounts(ctx, userID)
-	if err != nil {
-		return nil, err
+// syncAccount syncs one loaded account and records the outcome on it.
+func (h *handler) syncAccount(ctx context.Context, a *CalendarAccount) (int, error) {
+	from := time.Now().UTC().AddDate(0, -1, 0)
+	to := time.Now().UTC().AddDate(0, 3, 0)
+	n, syncErr := SyncAccount(ctx, h.app.Store, a, from, to)
+	status := ""
+	if syncErr != nil {
+		status = syncErr.Error()
 	}
+	if err := h.app.Store.UpdateSyncStatus(ctx, a.UserID, a.ID, status); err != nil {
+		return n, errors.Join(syncErr, fmt.Errorf("record sync status: %w", err))
+	}
+	return n, syncErr
+}
 
-	from := time.Now().AddDate(0, -1, 0)
-	to := time.Now().AddDate(0, 3, 0)
+// syncAccounts syncs every active account in accounts, collecting the
+// failures per account.
+func (h *handler) syncAccounts(ctx context.Context, accounts []*CalendarAccount) map[string]interface{} {
 	totalNew := 0
-	var syncErrors []string
-
+	syncErrors := make([]string, 0)
 	for _, a := range accounts {
 		if !a.IsActive {
 			continue
 		}
-		n, err := SyncAccount(ctx, h.app.Store, a, from, to)
-		if err != nil {
-			h.app.Store.UpdateSyncStatus(ctx, a.ID, err.Error())
-			syncErrors = append(syncErrors, a.Name+": "+err.Error())
-			continue
-		}
-		h.app.Store.UpdateSyncStatus(ctx, a.ID, "")
+		n, err := h.syncAccount(ctx, a)
 		totalNew += n
+		if err != nil {
+			syncErrors = append(syncErrors, a.Name+": "+err.Error())
+		}
 	}
-
 	return map[string]interface{}{
+		"accounts":   len(accounts),
 		"new_events": totalNew,
 		"errors":     syncErrors,
-	}, nil
+	}
 }
 
-func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
-	userID := client.UserIDFromRequest(r)
+// handleSyncMine syncs the caller's accounts.
+func (h *handler) handleSyncMine(w http.ResponseWriter, r *http.Request) {
+	accounts, err := h.app.Store.ListAccounts(r.Context(), client.GetUserID(r.Context()))
+	if err != nil {
+		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		return
+	}
+	writeJSON(w, r, http.StatusOK, h.syncAccounts(r.Context(), accounts))
+}
 
+// handleSyncAll is the system sync job: it syncs every user's accounts.
+func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
 	work := func(ctx context.Context) (map[string]interface{}, error) {
-		return h.doSyncAll(ctx, userID)
+		accounts, err := h.app.Store.ListAllAccounts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return h.syncAccounts(ctx, accounts), nil
 	}
 
 	if h.app.client.RunAsync(w, r, work) {
 		return
 	}
 
-	result, err := h.doSyncAll(r.Context(), userID)
+	result, err := work(r.Context())
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
@@ -393,9 +406,9 @@ func (h *handler) oauthRedirectURI(r *http.Request) string {
 
 func (h *handler) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
 	accountID := r.PathValue("id")
-	account, err := h.app.Store.GetAccount(r.Context(), accountID)
+	account, err := h.app.Store.GetAccount(r.Context(), client.GetUserID(r.Context()), accountID)
 	if err != nil {
-		writeAccountErr(w, r, err)
+		writeStoreErr(w, r, "account", err)
 		return
 	}
 	if account.OAuthClientID == "" {
@@ -417,9 +430,11 @@ func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Load WITH tokens: when Google omits refresh_token on re-consent, the
 	// stored one is kept instead of being overwritten with "".
-	account, err := h.app.Store.GetAccountWithTokens(r.Context(), accountID)
+	// Only an account of the user completing the flow can take the tokens.
+	userID := client.GetUserID(r.Context())
+	account, err := h.app.Store.GetAccountWithTokens(r.Context(), userID, accountID)
 	if err != nil {
-		writeAccountErr(w, r, err)
+		writeStoreErr(w, r, "account", err)
 		return
 	}
 
@@ -434,7 +449,7 @@ func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 	if refreshToken == "" {
 		refreshToken = account.RefreshToken
 	}
-	if err := h.app.Store.SaveOAuthTokens(r.Context(), accountID, tok.AccessToken, refreshToken, tok.ExpiresIn); err != nil {
+	if err := h.app.Store.SaveOAuthTokens(r.Context(), userID, accountID, tok.AccessToken, refreshToken, tok.ExpiresIn); err != nil {
 		writeOAuthPage(w, "Authorization Failed", "could not save tokens: "+err.Error(), 3000)
 		return
 	}
@@ -442,14 +457,7 @@ func (h *handler) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleListCalendars(w http.ResponseWriter, r *http.Request) {
-	accountID := r.URL.Query().Get("account_id")
-	var calendars []*Calendar
-	var err error
-	if accountID != "" {
-		calendars, err = h.app.Store.ListCalendars(r.Context(), accountID)
-	} else {
-		calendars, err = h.app.Store.ListAllCalendars(r.Context())
-	}
+	calendars, err := h.app.Store.ListCalendars(r.Context(), client.GetUserID(r.Context()), r.URL.Query().Get("account_id"))
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
@@ -458,7 +466,6 @@ func (h *handler) handleListCalendars(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
 	var req struct {
 		Color     string `json:"color"`
 		IsVisible *bool  `json:"is_visible"`
@@ -467,17 +474,14 @@ func (h *handler) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if req.Color != "" {
-		h.app.Store.UpdateCalendarColor(r.Context(), id, req.Color)
-	}
-	if req.IsVisible != nil {
-		h.app.Store.UpdateCalendarVisibility(r.Context(), id, *req.IsVisible)
+	if err := h.app.Store.UpdateCalendar(r.Context(), client.GetUserID(r.Context()), r.PathValue("id"), req.Color, req.IsVisible); err != nil {
+		writeStoreErr(w, r, "calendar", err)
+		return
 	}
 	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handleAddReminder(w http.ResponseWriter, r *http.Request) {
-	eventID := r.PathValue("id")
 	var req struct {
 		MinutesBefore int `json:"minutes_before"`
 	}
@@ -488,35 +492,33 @@ func (h *handler) handleAddReminder(w http.ResponseWriter, r *http.Request) {
 	if req.MinutesBefore <= 0 {
 		req.MinutesBefore = 15
 	}
-	reminder, err := h.app.Store.AddReminder(r.Context(), eventID, req.MinutesBefore)
+	reminder, err := h.app.Store.AddReminder(r.Context(), client.GetUserID(r.Context()), r.PathValue("id"), req.MinutesBefore)
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "failed to add reminder: %v", err)
+		writeStoreErr(w, r, "event", err)
 		return
 	}
 	writeJSON(w, r, http.StatusCreated, reminder)
 }
 
 func (h *handler) handleListReminders(w http.ResponseWriter, r *http.Request) {
-	eventID := r.PathValue("id")
-	reminders, err := h.app.Store.ListReminders(r.Context(), eventID)
+	reminders, err := h.app.Store.ListReminders(r.Context(), client.GetUserID(r.Context()), r.PathValue("id"))
 	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+		writeStoreErr(w, r, "event", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, reminders)
 }
 
 func (h *handler) handleDeleteReminder(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("rid")
-	if err := h.app.Store.DeleteReminder(r.Context(), id); err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
+	if err := h.app.Store.DeleteReminder(r.Context(), client.GetUserID(r.Context()), r.PathValue("rid")); err != nil {
+		writeStoreErr(w, r, "reminder", err)
 		return
 	}
 	writeJSON(w, r, http.StatusOK, map[string]bool{"success": true})
 }
 
 func (h *handler) handlePendingReminders(w http.ResponseWriter, r *http.Request) {
-	pending, err := h.app.Store.GetPendingReminders(r.Context())
+	pending, err := h.app.Store.GetPendingReminders(r.Context(), client.GetUserID(r.Context()))
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
@@ -524,14 +526,18 @@ func (h *handler) handlePendingReminders(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, r, http.StatusOK, pending)
 }
 
+// handleCheckReminders is the system reminder job: it marks every user's
+// due reminders notified and reports them.
 func (h *handler) handleCheckReminders(w http.ResponseWriter, r *http.Request) {
 	work := func(ctx context.Context) (map[string]interface{}, error) {
-		pending, err := h.app.Store.GetPendingReminders(ctx)
+		pending, err := h.app.Store.GetAllPendingReminders(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, p := range pending {
-			h.app.Store.MarkReminderNotified(ctx, p.ReminderID)
+			if err := h.app.Store.MarkReminderNotified(ctx, p.ReminderID); err != nil {
+				return nil, fmt.Errorf("mark reminder %s notified: %w", p.ReminderID, err)
+			}
 		}
 		return map[string]interface{}{
 			"checked":   len(pending),
@@ -552,7 +558,6 @@ func (h *handler) handleCheckReminders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleSetReminders(w http.ResponseWriter, r *http.Request) {
-	eventID := r.PathValue("id")
 	var req struct {
 		MinutesBefore []int `json:"minutes_before"`
 	}
@@ -560,57 +565,12 @@ func (h *handler) handleSetReminders(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "invalid body")
 		return
 	}
-	existing, _ := h.app.Store.ListReminders(r.Context(), eventID)
-	for _, rem := range existing {
-		h.app.Store.DeleteReminder(r.Context(), rem.ID)
-	}
-	reminders := make([]*Reminder, 0)
-	for _, mins := range req.MinutesBefore {
-		if mins <= 0 {
-			continue
-		}
-		rem, err := h.app.Store.AddReminder(r.Context(), eventID, mins)
-		if err != nil {
-			continue
-		}
-		reminders = append(reminders, rem)
+	reminders, err := h.app.Store.SetReminders(r.Context(), client.GetUserID(r.Context()), r.PathValue("id"), req.MinutesBefore)
+	if err != nil {
+		writeStoreErr(w, r, "event", err)
+		return
 	}
 	writeJSON(w, r, http.StatusOK, reminders)
-}
-
-func (h *handler) handleListEventReminders(w http.ResponseWriter, r *http.Request) {
-	eventID := r.URL.Query().Get("event_id")
-	if eventID == "" {
-		writeErr(w, r, http.StatusBadRequest, "event_id required")
-		return
-	}
-	reminders, err := h.app.Store.ListReminders(r.Context(), eventID)
-	if err != nil {
-		writeErr(w, r, http.StatusInternalServerError, "%v", err)
-		return
-	}
-	mins := make([]int, 0, len(reminders))
-	for _, r := range reminders {
-		mins = append(mins, r.MinutesBefore)
-	}
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{"minutes_before": mins})
-}
-
-func (h *handler) handleBulkReminders(w http.ResponseWriter, r *http.Request) {
-	eventIDs := r.URL.Query()["event_id"]
-	result := make(map[string][]int)
-	for _, eid := range eventIDs {
-		reminders, err := h.app.Store.ListReminders(r.Context(), eid)
-		if err != nil {
-			continue
-		}
-		mins := make([]int, 0)
-		for _, rem := range reminders {
-			mins = append(mins, rem.MinutesBefore)
-		}
-		result[eid] = mins
-	}
-	writeJSON(w, r, http.StatusOK, result)
 }
 
 func (h *handler) handleCheckConflicts(w http.ResponseWriter, r *http.Request) {
@@ -631,7 +591,7 @@ func (h *handler) handleCheckConflicts(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "invalid end")
 		return
 	}
-	conflicts, err := h.app.Store.GetConflictingEvents(r.Context(), start, end, excludeID)
+	conflicts, err := h.app.Store.GetConflictingEvents(r.Context(), client.GetUserID(r.Context()), start, end, excludeID)
 	if err != nil {
 		writeErr(w, r, http.StatusInternalServerError, "%v", err)
 		return
@@ -651,15 +611,14 @@ func writeErr(w http.ResponseWriter, r *http.Request, status int, format string,
 	httputil.WriteError(w, r, status, format, args...)
 }
 
-// writeAccountErr reports a failed account load: 404 only when the account
-// doesn't exist. Any other error (e.g. a secret that can't be decrypted) is a
-// 500 carrying the real cause, never disguised as "account not found".
-func writeAccountErr(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, sql.ErrNoRows) {
-		writeErr(w, r, http.StatusNotFound, "account not found")
+// writeStoreErr answers 404 for a record that does not exist or is not the
+// caller's, and 500 with the real cause for anything else.
+func writeStoreErr(w http.ResponseWriter, r *http.Request, what string, err error) {
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, r, http.StatusNotFound, "%s not found", what)
 		return
 	}
-	writeErr(w, r, http.StatusInternalServerError, "load account: %v", err)
+	writeErr(w, r, http.StatusInternalServerError, "%v", err)
 }
 
 // writeOAuthPage renders the small popup page the OAuth flow lands on.

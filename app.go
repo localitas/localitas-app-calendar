@@ -84,34 +84,49 @@ func (a *App) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", a.handleIndex)
 	mux.HandleFunc("GET /swagger.json", HandleSwagger)
 	mux.HandleFunc("GET /help.md", handleHelpMarkdown)
-	mux.HandleFunc("GET /api/events", h.handleGetEvents)
-	mux.HandleFunc("POST /api/events", h.handleCreateEvent)
-	mux.HandleFunc("GET /api/events/{id}", h.handleGetEvent)
-	mux.HandleFunc("PUT /api/events/{id}", h.handleUpdateEvent)
-	mux.HandleFunc("DELETE /api/events/{id}", h.handleDeleteEvent)
-	mux.HandleFunc("GET /api/search", h.handleSearch)
-	mux.HandleFunc("GET /api/parse-date", h.handleParseDate)
-	mux.HandleFunc("GET /api/accounts", h.handleListAccounts)
-	mux.HandleFunc("POST /api/accounts", h.handleCreateAccount)
-	mux.HandleFunc("PUT /api/accounts/{id}", h.handleUpdateAccount)
-	mux.HandleFunc("DELETE /api/accounts/{id}", h.handleDeleteAccount)
-	mux.HandleFunc("POST /api/accounts/{id}/sync", h.handleSyncAccount)
-	mux.HandleFunc("POST /api/sync", h.handleSyncAll)
-	mux.HandleFunc("GET /api/oauth/{id}/start", h.handleOAuthStart)
-	mux.HandleFunc("GET /api/oauth/callback", h.handleOAuthCallback)
-	mux.HandleFunc("GET /api/calendars", h.handleListCalendars)
-	mux.HandleFunc("PUT /api/calendars/{id}", h.handleUpdateCalendar)
-	mux.HandleFunc("POST /api/events/{id}/reminders", h.handleAddReminder)
-	mux.HandleFunc("PUT /api/events/{id}/reminders", h.handleSetReminders)
-	mux.HandleFunc("GET /api/events/{id}/reminders", h.handleListReminders)
-	mux.HandleFunc("DELETE /api/reminders/{rid}", h.handleDeleteReminder)
-	mux.HandleFunc("GET /api/reminders/pending", h.handlePendingReminders)
-	mux.HandleFunc("POST /api/reminders/check", h.handleCheckReminders)
-	mux.HandleFunc("GET /api/conflicts", h.handleCheckConflicts)
-	mux.HandleFunc("GET /api/presets", h.handleListPresets)
 
-	caldavHandler := NewCalDAVHandler(a.Store, "/caldav/")
-	mux.Handle("/caldav/", caldavHandler)
+	// Every user route acts for the user core vouches for; one without a
+	// verified user is refused, and changing anything needs write scope.
+	user := func(pattern string, handler http.HandlerFunc) {
+		mux.Handle(pattern, client.AuthMiddleware(handler))
+	}
+	writer := func(pattern string, handler http.HandlerFunc) {
+		user(pattern, client.RequireScopeFunc(client.ScopeWrite, handler))
+	}
+	// Cron jobs act across every user's data, so only core may call them.
+	system := func(pattern string, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, client.RequireSystem(handler))
+	}
+
+	user("GET /api/events", h.handleGetEvents)
+	writer("POST /api/events", h.handleCreateEvent)
+	user("GET /api/events/{id}", h.handleGetEvent)
+	writer("PUT /api/events/{id}", h.handleUpdateEvent)
+	writer("DELETE /api/events/{id}", h.handleDeleteEvent)
+	user("GET /api/search", h.handleSearch)
+	user("GET /api/parse-date", h.handleParseDate)
+	user("GET /api/accounts", h.handleListAccounts)
+	writer("POST /api/accounts", h.handleCreateAccount)
+	writer("PUT /api/accounts/{id}", h.handleUpdateAccount)
+	writer("DELETE /api/accounts/{id}", h.handleDeleteAccount)
+	writer("POST /api/accounts/{id}/sync", h.handleSyncAccount)
+	writer("POST /api/accounts/sync", h.handleSyncMine)
+	writer("GET /api/oauth/{id}/start", h.handleOAuthStart)
+	writer("GET /api/oauth/callback", h.handleOAuthCallback)
+	user("GET /api/calendars", h.handleListCalendars)
+	writer("PUT /api/calendars/{id}", h.handleUpdateCalendar)
+	writer("POST /api/events/{id}/reminders", h.handleAddReminder)
+	writer("PUT /api/events/{id}/reminders", h.handleSetReminders)
+	user("GET /api/events/{id}/reminders", h.handleListReminders)
+	writer("DELETE /api/reminders/{rid}", h.handleDeleteReminder)
+	user("GET /api/reminders/pending", h.handlePendingReminders)
+	user("GET /api/conflicts", h.handleCheckConflicts)
+	user("GET /api/presets", h.handleListPresets)
+
+	system("POST /api/sync", h.handleSyncAll)
+	system("POST /api/reminders/check", h.handleCheckReminders)
+
+	mux.Handle("/caldav/", NewCalDAVHandler(a.Store, caldavPrefix))
 	mux.HandleFunc("/.well-known/caldav", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, a.BasePath+"caldav/", http.StatusPermanentRedirect)
 	})

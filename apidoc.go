@@ -111,22 +111,22 @@ var CalendarAPIDoc = APIDoc{
 		},
 		{
 			Method:  "PROPFIND",
-			Path:    "/caldav/",
-			Summary: "CalDAV discovery — list calendars",
+			Path:    "/caldav/me/calendars/",
+			Summary: "CalDAV discovery — list the caller's calendars",
 		},
 		{
 			Method:  "REPORT",
-			Path:    "/caldav/{calendar_id}/",
+			Path:    "/caldav/me/calendars/{calendar_id}/",
 			Summary: "CalDAV query — list/filter events by time range",
 		},
 		{
 			Method:  "PUT",
-			Path:    "/caldav/{calendar_id}/{uid}.ics",
+			Path:    "/caldav/me/calendars/{calendar_id}/{uid}.ics",
 			Summary: "CalDAV create/update event via iCalendar",
 		},
 		{
 			Method:  "DELETE",
-			Path:    "/caldav/{calendar_id}/{uid}.ics",
+			Path:    "/caldav/me/calendars/{calendar_id}/{uid}.ics",
 			Summary: "CalDAV delete event",
 		},
 	},

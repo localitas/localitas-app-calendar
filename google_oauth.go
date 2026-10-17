@@ -180,7 +180,8 @@ func DiscoverGoogleCalendars(ctx context.Context, accessToken string) ([]calDAVC
 	return cals, nil
 }
 
-func (s *Store) SaveOAuthTokens(ctx context.Context, accountID, accessToken, refreshToken string, expiresIn int) error {
+// SaveOAuthTokens stores the OAuth tokens of userID's account accountID.
+func (s *Store) SaveOAuthTokens(ctx context.Context, userID, accountID, accessToken, refreshToken string, expiresIn int) error {
 	now := time.Now().UTC().Unix()
 	expiry := now + int64(expiresIn)
 	encAccess, err := client.Encrypt(accessToken)
@@ -191,22 +192,22 @@ func (s *Store) SaveOAuthTokens(ctx context.Context, accountID, accessToken, ref
 	if err != nil {
 		return fmt.Errorf("encrypt refresh_token: %w", err)
 	}
-	_, err = s.db.ExecContext(ctx,
-		"UPDATE accounts SET access_token = ?, refresh_token = ?, token_expiry = ?, updated_at = ? WHERE id = ?",
-		encAccess, encRefresh, expiry, now, accountID)
-	return err
+	return requireOneRow(s.db.ExecContext(ctx,
+		"UPDATE accounts SET access_token = ?, refresh_token = ?, token_expiry = ?, updated_at = ? WHERE id = ? AND user_id = ? AND provider != ?",
+		encAccess, encRefresh, expiry, now, accountID, userID, localProvider))
 }
 
-func (s *Store) GetAccountWithTokens(ctx context.Context, id string) (*CalendarAccount, error) {
-	a, err := s.GetAccount(ctx, id)
+// GetAccountWithTokens returns userID's account id with its OAuth tokens.
+func (s *Store) GetAccountWithTokens(ctx context.Context, userID, id string) (*CalendarAccount, error) {
+	a, err := s.GetAccount(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
 	var accessToken, refreshToken string
 	var tokenExpiry int64
-	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(access_token,''), COALESCE(refresh_token,''), COALESCE(token_expiry,0) FROM accounts WHERE id = ?", id).
+	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(access_token,''), COALESCE(refresh_token,''), COALESCE(token_expiry,0) FROM accounts WHERE id = ? AND user_id = ?", id, userID).
 		Scan(&accessToken, &refreshToken, &tokenExpiry); err != nil {
-		return nil, fmt.Errorf("read tokens: %w", err)
+		return nil, fmt.Errorf("read tokens: %w", notFound(err))
 	}
 	if a.AccessToken, err = client.Decrypt(accessToken); err != nil {
 		return nil, fmt.Errorf("decrypt access_token: %w", err)
@@ -242,5 +243,5 @@ func EnsureValidToken(ctx context.Context, store *Store, account *CalendarAccoun
 		refreshToSave = tok.RefreshToken
 		account.RefreshToken = tok.RefreshToken
 	}
-	return store.SaveOAuthTokens(ctx, account.ID, tok.AccessToken, refreshToSave, tok.ExpiresIn)
+	return store.SaveOAuthTokens(ctx, account.UserID, account.ID, tok.AccessToken, refreshToSave, tok.ExpiresIn)
 }

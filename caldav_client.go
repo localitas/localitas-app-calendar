@@ -2,7 +2,9 @@ package calendar
 
 import (
 	"context"
+	"database/sql"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -430,20 +432,18 @@ func (c *CalDAVClient) DeleteEvent(ctx context.Context, uid string) error {
 	return nil
 }
 
-func getCalDAVClientForEvent(ctx context.Context, store *Store, event *Event) (*CalDAVClient, error) {
-	if event.CalendarID == "" || event.RemoteUID == "" {
+// remoteClientForCalendar returns a client for the remote calendar behind
+// userID's calendar cal, or nil when it has none (a local calendar).
+func remoteClientForCalendar(ctx context.Context, store *Store, userID string, cal *Calendar) (*CalDAVClient, error) {
+	if cal.AccountID == localCalendarID(userID) {
 		return nil, nil
 	}
-	cal, err := store.GetCalendar(ctx, event.CalendarID)
-	if err != nil {
-		return nil, nil
-	}
-	account, err := store.GetAccount(ctx, cal.AccountID)
+	account, err := store.GetAccount(ctx, userID, cal.AccountID)
 	if err != nil {
 		return nil, fmt.Errorf("load account %s: %w", cal.AccountID, err)
 	}
 	if account.NeedsOAuth() {
-		fullAcct, err := store.GetAccountWithTokens(ctx, account.ID)
+		fullAcct, err := store.GetAccountWithTokens(ctx, userID, account.ID)
 		if err != nil {
 			return nil, fmt.Errorf("get tokens: %w", err)
 		}
@@ -458,16 +458,22 @@ func getCalDAVClientForEvent(ctx context.Context, store *Store, event *Event) (*
 	return nil, nil
 }
 
+// SyncAccount pulls the remote events of account, which the caller has
+// already loaded for its owner.
 func SyncAccount(ctx context.Context, store *Store, account *CalendarAccount, from, to time.Time) (int, error) {
-	store.db.ExecContext(ctx, `
+	if _, err := store.db.ExecContext(ctx, `
 		DELETE FROM events WHERE rowid NOT IN (
 			SELECT MIN(rowid) FROM events WHERE account_id = ? AND remote_uid != '' GROUP BY remote_uid
-		) AND account_id = ? AND remote_uid != ''`, account.ID, account.ID)
+		) AND account_id = ? AND remote_uid != ''`, account.ID, account.ID); err != nil {
+		return 0, fmt.Errorf("dedupe events: %w", err)
+	}
 
-	store.db.ExecContext(ctx, `
+	if _, err := store.db.ExecContext(ctx, `
 		DELETE FROM calendars WHERE rowid NOT IN (
 			SELECT MIN(rowid) FROM calendars WHERE account_id = ? GROUP BY name
-		) AND account_id = ?`, account.ID, account.ID)
+		) AND account_id = ?`, account.ID, account.ID); err != nil {
+		return 0, fmt.Errorf("dedupe calendars: %w", err)
+	}
 
 	type calWithEvents struct {
 		calendarID string
@@ -478,7 +484,7 @@ func SyncAccount(ctx context.Context, store *Store, account *CalendarAccount, fr
 	calColors := []string{"#7d6b96", "#e88b8b", "#60a5fa", "#a8d5ba", "#f5e6a8", "#c5b3e0", "#f0a8c8", "#8bc5d5"}
 
 	if account.NeedsOAuth() {
-		fullAcct, err := store.GetAccountWithTokens(ctx, account.ID)
+		fullAcct, err := store.GetAccountWithTokens(ctx, account.UserID, account.ID)
 		if err != nil {
 			return 0, fmt.Errorf("get tokens: %w", err)
 		}
@@ -496,13 +502,14 @@ func SyncAccount(ctx context.Context, store *Store, account *CalendarAccount, fr
 			if color == "" {
 				color = calColors[i%len(calColors)]
 			}
-			stored, uErr := store.UpsertCalendar(ctx, account.ID, cal.DisplayName, cal.Href, color)
-			if uErr != nil {
-				continue
+			stored, err := store.UpsertCalendar(ctx, account.ID, cal.DisplayName, cal.Href, color)
+			if err != nil {
+				return 0, fmt.Errorf("store calendar %s: %w", cal.DisplayName, err)
 			}
 			caldavClient := NewCalDAVClientWithBearer(cal.Href, fullAcct.AccessToken)
-			events, fErr := caldavClient.FetchEvents(ctx, from, to)
-			if fErr != nil {
+			events, err := caldavClient.FetchEvents(ctx, from, to)
+			if err != nil {
+				logger.Warn("skipping calendar that failed to fetch", "account_id", account.ID, "calendar", cal.DisplayName, "error", err)
 				continue
 			}
 			results = append(results, calWithEvents{calendarID: stored.ID, events: events})
@@ -528,27 +535,27 @@ func SyncAccount(ctx context.Context, store *Store, account *CalendarAccount, fr
 				if color == "" {
 					color = calColors[i%len(calColors)]
 				}
-				stored, uErr := store.UpsertCalendar(ctx, account.ID, cal.DisplayName, cal.Href, color)
-				if uErr != nil {
-					continue
+				stored, err := store.UpsertCalendar(ctx, account.ID, cal.DisplayName, cal.Href, color)
+				if err != nil {
+					return 0, fmt.Errorf("store calendar %s: %w", cal.DisplayName, err)
 				}
-				events, fErr := caldavClient.FetchEventsFromURL(ctx, calURL, from, to)
-				if fErr != nil {
+				events, err := caldavClient.FetchEventsFromURL(ctx, calURL, from, to)
+				if err != nil {
+					logger.Warn("skipping calendar that failed to fetch", "account_id", account.ID, "calendar", cal.DisplayName, "error", err)
 					continue
 				}
 				results = append(results, calWithEvents{calendarID: stored.ID, events: events})
 			}
 		} else {
-			stored, uErr := store.UpsertCalendar(ctx, account.ID, account.Name, account.CalDAVURL, account.Color)
-			calID := ""
-			if uErr == nil {
-				calID = stored.ID
+			stored, err := store.UpsertCalendar(ctx, account.ID, account.Name, account.CalDAVURL, account.Color)
+			if err != nil {
+				return 0, fmt.Errorf("store calendar %s: %w", account.Name, err)
 			}
-			events, fErr := caldavClient.FetchEvents(ctx, from, to)
-			if fErr != nil {
-				return 0, fErr
+			events, err := caldavClient.FetchEvents(ctx, from, to)
+			if err != nil {
+				return 0, err
 			}
-			results = append(results, calWithEvents{calendarID: calID, events: events})
+			results = append(results, calWithEvents{calendarID: stored.ID, events: events})
 		}
 	}
 
@@ -569,20 +576,25 @@ func SyncAccount(ctx context.Context, store *Store, account *CalendarAccount, fr
 
 			var existingID string
 			err := store.db.QueryRowContext(ctx, "SELECT id FROM events WHERE account_id = ? AND remote_uid = ?", account.ID, re.UID).Scan(&existingID)
-			if err == nil {
-				store.db.ExecContext(ctx, `
+			switch {
+			case err == nil:
+				if _, err := store.db.ExecContext(ctx, `
 					UPDATE events SET calendar_id=?, title=?, description=?, start_time=?, end_time=?, all_day=?, location=?, recurrence=?, timezone=?, updated_at=?
 					WHERE id=?`,
-					r.calendarID, re.Summary, re.Description, re.Start.Unix(), re.End.Unix(), allDayInt, re.Location, re.Recurrence, re.Timezone, now, existingID)
-			} else {
+					r.calendarID, re.Summary, re.Description, re.Start.Unix(), re.End.Unix(), allDayInt, re.Location, re.Recurrence, re.Timezone, now, existingID); err != nil {
+					return newCount, fmt.Errorf("update event %s: %w", re.UID, err)
+				}
+			case errors.Is(err, sql.ErrNoRows):
 				id := newEventID()
-				_, err = store.db.ExecContext(ctx, `
+				if _, err := store.db.ExecContext(ctx, `
 					INSERT INTO events (id, account_id, calendar_id, remote_uid, title, description, start_time, end_time, all_day, location, recurrence, timezone, created_at, updated_at)
 					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					id, account.ID, r.calendarID, re.UID, re.Summary, re.Description, re.Start.Unix(), re.End.Unix(), allDayInt, re.Location, re.Recurrence, re.Timezone, now, now)
-				if err == nil {
-					newCount++
+					id, account.ID, r.calendarID, re.UID, re.Summary, re.Description, re.Start.Unix(), re.End.Unix(), allDayInt, re.Location, re.Recurrence, re.Timezone, now, now); err != nil {
+					return newCount, fmt.Errorf("insert event %s: %w", re.UID, err)
 				}
+				newCount++
+			default:
+				return newCount, fmt.Errorf("find event %s: %w", re.UID, err)
 			}
 		}
 	}

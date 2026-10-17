@@ -4,6 +4,7 @@ import "time"
 
 type CalendarAccount struct {
 	ID                string    `json:"id"`
+	UserID            string    `json:"-"`
 	Name              string    `json:"name"`
 	Provider          string    `json:"provider"`
 	Email             string    `json:"email"`
@@ -75,6 +76,7 @@ type PendingReminder struct {
 	EventStart    string `json:"event_start"`
 	MinutesBefore int    `json:"minutes_before"`
 	Location      string `json:"location,omitempty"`
+	UserID        string `json:"user_id,omitempty"`
 }
 
 type DayEvents struct {

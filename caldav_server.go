@@ -3,15 +3,30 @@ package calendar
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
 	ical "github.com/emersion/go-ical"
+	"github.com/emersion/go-webdav"
 	"github.com/emersion/go-webdav/caldav"
+	"github.com/localitas/localitas-go"
 )
 
-const caldavPrefix = "/caldav/"
+// go-webdav places resources by depth under the prefix: principal, home
+// set, calendar, object. The principal is always the verified caller, so it
+// is spelled "me".
+const (
+	caldavPrefix    = "/caldav/"
+	caldavPrincipal = caldavPrefix + "me/"
+	caldavHome      = caldavPrincipal + "calendars/"
+)
+
+func calendarPath(id string) string {
+	return caldavHome + id + "/"
+}
 
 type CalDAVBackend struct {
 	store *Store
@@ -21,115 +36,182 @@ func NewCalDAVBackend(store *Store) *CalDAVBackend {
 	return &CalDAVBackend{store: store}
 }
 
-func NewCalDAVHandler(store *Store, prefix string) *caldav.Handler {
-	return &caldav.Handler{
+// NewCalDAVHandler serves the CalDAV tree for the user core vouches for: a
+// request without a verified user is refused, every lookup sees only that
+// user's calendars, and changing anything needs write scope.
+func NewCalDAVHandler(store *Store, prefix string) http.Handler {
+	dav := &caldav.Handler{
 		Backend: NewCalDAVBackend(store),
 		Prefix:  prefix,
 	}
+	writer := client.RequireScope(client.ScopeWrite)(dav)
+	return client.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions, "PROPFIND", "REPORT":
+			dav.ServeHTTP(w, r)
+		default:
+			writer.ServeHTTP(w, r)
+		}
+	}))
+}
+
+// caldavUser is the verified user of a CalDAV request.
+func caldavUser(ctx context.Context) (string, error) {
+	userID := client.GetUserID(ctx)
+	if userID == "" {
+		return "", webdav.NewHTTPError(http.StatusUnauthorized, errors.New("no verified user"))
+	}
+	return userID, nil
+}
+
+// davErr turns a record the caller does not own into a CalDAV 404.
+func davErr(err error) error {
+	if errors.Is(err, ErrNotFound) {
+		return webdav.NewHTTPError(http.StatusNotFound, err)
+	}
+	return err
 }
 
 func (b *CalDAVBackend) CurrentUserPrincipal(ctx context.Context) (string, error) {
-	return "/caldav/", nil
+	return caldavPrincipal, nil
 }
 
 func (b *CalDAVBackend) CalendarHomeSetPath(ctx context.Context) (string, error) {
-	return "/caldav/", nil
+	return caldavHome, nil
+}
+
+// calendarAt returns the caller's calendar a CalDAV path names.
+func (b *CalDAVBackend) calendarAt(ctx context.Context, path string) (string, *Calendar, error) {
+	userID, err := caldavUser(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	segment := extractCalendarID(path)
+	if segment == "" {
+		return "", nil, webdav.NewHTTPError(http.StatusNotFound, errors.New("calendar not found"))
+	}
+	cal, err := b.store.GetCalendarByPath(ctx, userID, segment)
+	if err != nil {
+		return "", nil, davErr(err)
+	}
+	return userID, cal, nil
+}
+
+func davCalendar(c *Calendar) caldav.Calendar {
+	return caldav.Calendar{
+		Path:                  calendarPath(c.ID),
+		Name:                  c.Name,
+		Description:           c.Name,
+		SupportedComponentSet: []string{"VEVENT"},
+	}
 }
 
 func (b *CalDAVBackend) CreateCalendar(ctx context.Context, calendar *caldav.Calendar) error {
-	_, err := b.store.UpsertCalendar(ctx, "", calendar.Name, calendar.Path, "#7d6b96")
+	userID, err := caldavUser(ctx)
+	if err != nil {
+		return err
+	}
+	local, err := b.store.EnsureLocalCalendar(ctx, userID)
+	if err != nil {
+		return err
+	}
+	_, err = b.store.UpsertCalendar(ctx, local.AccountID, calendar.Name, calendar.Path, "#7d6b96")
 	return err
 }
 
 func (b *CalDAVBackend) ListCalendars(ctx context.Context) ([]caldav.Calendar, error) {
-	cals, err := b.store.ListAllCalendars(ctx)
+	userID, err := caldavUser(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if len(cals) == 0 {
-		cal, err := b.store.UpsertCalendar(ctx, "", "Default", "/caldav/default/", "#7d6b96")
-		if err != nil {
-			return nil, err
-		}
-		cals = []*Calendar{cal}
+	if _, err := b.store.EnsureLocalCalendar(ctx, userID); err != nil {
+		return nil, err
+	}
+	cals, err := b.store.ListCalendars(ctx, userID, "")
+	if err != nil {
+		return nil, err
 	}
 	out := make([]caldav.Calendar, 0, len(cals))
 	for _, c := range cals {
-		out = append(out, caldav.Calendar{
-			Path:                  "/caldav/" + c.ID + "/",
-			Name:                  c.Name,
-			Description:           c.Name,
-			SupportedComponentSet: []string{"VEVENT"},
-		})
+		out = append(out, davCalendar(c))
 	}
 	return out, nil
 }
 
 func (b *CalDAVBackend) GetCalendar(ctx context.Context, path string) (*caldav.Calendar, error) {
-	calID := extractCalendarID(path)
-	if calID == "" {
-		return nil, fmt.Errorf("calendar not found")
-	}
-	c, err := b.store.GetCalendar(ctx, calID)
+	_, c, err := b.calendarAt(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	return &caldav.Calendar{
-		Path:                  "/caldav/" + c.ID + "/",
-		Name:                  c.Name,
-		Description:           c.Name,
-		SupportedComponentSet: []string{"VEVENT"},
-	}, nil
+	dc := davCalendar(c)
+	return &dc, nil
+}
+
+// objectAt returns the caller's event a CalDAV object path names. Events
+// stored without a remote UID are addressed as <id>@localitas.
+func (b *CalDAVBackend) objectAt(ctx context.Context, path string) (string, *Calendar, *Event, error) {
+	userID, cal, err := b.calendarAt(ctx, path)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	uid := extractEventUID(path)
+	if uid == "" {
+		return "", nil, nil, webdav.NewHTTPError(http.StatusNotFound, errors.New("event not found"))
+	}
+	e, err := b.store.GetEventByRemoteUID(ctx, userID, cal.ID, uid)
+	if errors.Is(err, ErrNotFound) && strings.HasSuffix(uid, "@localitas") {
+		e, err = b.store.Get(ctx, userID, strings.TrimSuffix(uid, "@localitas"))
+		if err == nil && (e.CalendarID != cal.ID || e.RemoteUID != "") {
+			err = ErrNotFound
+		}
+	}
+	if err != nil {
+		return "", nil, nil, davErr(err)
+	}
+	return userID, cal, e, nil
 }
 
 func (b *CalDAVBackend) GetCalendarObject(ctx context.Context, path string, req *caldav.CalendarCompRequest) (*caldav.CalendarObject, error) {
-	uid := extractEventUID(path)
-	if uid == "" {
-		return nil, fmt.Errorf("event not found")
-	}
-	e, err := b.store.GetEventByRemoteUID(ctx, uid)
+	_, cal, e, err := b.objectAt(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	return eventToCalendarObject(e, path), nil
+	return eventToCalendarObject(e, calendarPath(cal.ID)), nil
 }
 
 func (b *CalDAVBackend) ListCalendarObjects(ctx context.Context, path string, req *caldav.CalendarCompRequest) ([]caldav.CalendarObject, error) {
-	calID := extractCalendarID(path)
-	if calID == "" {
-		return nil, fmt.Errorf("calendar not found")
-	}
-	events, err := b.store.GetEventsByCalendarID(ctx, calID)
+	userID, cal, err := b.calendarAt(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	return eventsToCalendarObjects(events, path), nil
+	events, err := b.store.GetEventsByCalendarID(ctx, userID, cal.ID)
+	if err != nil {
+		return nil, err
+	}
+	return eventsToCalendarObjects(events, calendarPath(cal.ID)), nil
 }
 
 func (b *CalDAVBackend) QueryCalendarObjects(ctx context.Context, path string, query *caldav.CalendarQuery) ([]caldav.CalendarObject, error) {
-	calID := extractCalendarID(path)
-	if calID == "" {
-		return nil, fmt.Errorf("calendar not found")
+	userID, cal, err := b.calendarAt(ctx, path)
+	if err != nil {
+		return nil, err
 	}
-
 	var events []*Event
-	var err error
-
 	if !query.CompFilter.Start.IsZero() && !query.CompFilter.End.IsZero() {
-		events, err = b.store.GetEventsByCalendarIDRange(ctx, calID, query.CompFilter.Start, query.CompFilter.End)
+		events, err = b.store.GetEventsByCalendarIDRange(ctx, userID, cal.ID, query.CompFilter.Start, query.CompFilter.End)
 	} else {
-		events, err = b.store.GetEventsByCalendarID(ctx, calID)
+		events, err = b.store.GetEventsByCalendarID(ctx, userID, cal.ID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return eventsToCalendarObjects(events, path), nil
+	return eventsToCalendarObjects(events, calendarPath(cal.ID)), nil
 }
 
 func (b *CalDAVBackend) PutCalendarObject(ctx context.Context, path string, calendar *ical.Calendar, opts *caldav.PutCalendarObjectOptions) (*caldav.CalendarObject, error) {
-	calID := extractCalendarID(path)
-	if calID == "" {
-		return nil, fmt.Errorf("calendar not found")
+	userID, cal, err := b.calendarAt(ctx, path)
+	if err != nil {
+		return nil, err
 	}
 
 	for _, comp := range calendar.Children {
@@ -145,7 +227,7 @@ func (b *CalDAVBackend) PutCalendarObject(ctx context.Context, path string, cale
 
 		dtStart, err := event.DateTimeStart(time.UTC)
 		if err != nil {
-			continue
+			return nil, webdav.NewHTTPError(http.StatusBadRequest, fmt.Errorf("DTSTART: %w", err))
 		}
 		dtEnd, err := event.DateTimeEnd(time.UTC)
 		if err != nil {
@@ -167,190 +249,149 @@ func (b *CalDAVBackend) PutCalendarObject(ctx context.Context, path string, cale
 			uid = newEventUID()
 		}
 
-		existing, _ := b.store.GetEventByRemoteUID(ctx, uid)
-		if existing != nil {
-			b.store.Update(ctx, existing.ID, summary, description, location, dtStart, dtEnd, allDay)
-		} else {
-			b.store.Create(ctx, calID, "", uid, summary, description, location, tz, dtStart, dtEnd, allDay)
-		}
-
-		e, _ := b.store.GetEventByRemoteUID(ctx, uid)
-		if e != nil {
-			return eventToCalendarObject(e, path), nil
-		}
-	}
-
-	return nil, fmt.Errorf("no event found in calendar data")
-}
-
-func (b *CalDAVBackend) DeleteCalendarObject(ctx context.Context, path string) error {
-	uid := extractEventUID(path)
-	if uid == "" {
-		return fmt.Errorf("event not found")
-	}
-	return b.store.DeleteEventByRemoteUID(ctx, uid)
-}
-
-func (b *CalDAVBackend) ListCalendarsJSON(ctx context.Context) ([]*Calendar, error) {
-	return b.store.ListAllCalendars(ctx)
-}
-
-func (b *CalDAVBackend) GetEventsByDay(ctx context.Context, start, end time.Time) ([]DayEvents, error) {
-	return b.store.GetEventsByDay(ctx, start, end)
-}
-
-func (b *CalDAVBackend) GetEvent(ctx context.Context, id string) (*Event, error) {
-	return b.store.Get(ctx, id)
-}
-
-func (b *CalDAVBackend) CreateEventJSON(ctx context.Context, calendarID, title, description, location, timezone string, start, end time.Time, allDay bool) (*Event, error) {
-	uid := newEventUID()
-
-	cal := buildICalEvent(uid, title, description, location, timezone, start, end, allDay)
-
-	if calendarID != "" {
-		path := "/caldav/" + calendarID + "/"
-		_, err := b.PutCalendarObject(ctx, path+uid+".ics", cal, nil)
-		if err != nil {
-			return nil, fmt.Errorf("caldav put: %w", err)
-		}
-		e, err := b.store.GetEventByRemoteUID(ctx, uid)
-		if err != nil {
+		existing, err := b.store.GetEventByRemoteUID(ctx, userID, cal.ID, uid)
+		switch {
+		case err == nil:
+			if err := b.store.Update(ctx, userID, existing.ID, summary, description, location, dtStart, dtEnd, allDay); err != nil {
+				return nil, davErr(err)
+			}
+		case errors.Is(err, ErrNotFound):
+			if _, err := b.store.Create(ctx, cal, uid, summary, description, location, tz, dtStart, dtEnd, allDay); err != nil {
+				return nil, err
+			}
+		default:
 			return nil, err
 		}
 
-		storedCal, _ := b.store.GetCalendar(ctx, calendarID)
-		if storedCal != nil {
-			account, err := b.store.GetAccount(ctx, storedCal.AccountID)
-			if err != nil {
-				logger.Error("remote sync skipped: cannot load account", "account_id", storedCal.AccountID, "error", err)
-			} else {
-				syncEventToRemote(ctx, b.store, account, storedCal, uid, title, description, location, start, end, allDay)
-			}
+		e, err := b.store.GetEventByRemoteUID(ctx, userID, cal.ID, uid)
+		if err != nil {
+			return nil, davErr(err)
 		}
-		return e, nil
+		return eventToCalendarObject(e, calendarPath(cal.ID)), nil
 	}
 
-	path := "/caldav/local/"
-	_, err := b.PutCalendarObject(ctx, path+uid+".ics", cal, nil)
-	if err != nil {
-		return nil, fmt.Errorf("caldav put: %w", err)
-	}
-	return b.store.GetEventByRemoteUID(ctx, uid)
+	return nil, webdav.NewHTTPError(http.StatusBadRequest, errors.New("no event found in calendar data"))
 }
 
-func (b *CalDAVBackend) UpdateEventJSON(ctx context.Context, id, title, description, location string, start, end time.Time, allDay bool) (*Event, error) {
-	existing, err := b.store.Get(ctx, id)
+func (b *CalDAVBackend) DeleteCalendarObject(ctx context.Context, path string) error {
+	userID, _, e, err := b.objectAt(ctx, path)
+	if err != nil {
+		return err
+	}
+	return davErr(b.store.Delete(ctx, userID, e.ID))
+}
+
+func (b *CalDAVBackend) GetEventsByDay(ctx context.Context, userID string, start, end time.Time) ([]DayEvents, error) {
+	return b.store.GetEventsByDay(ctx, userID, start, end)
+}
+
+func (b *CalDAVBackend) GetEvent(ctx context.Context, userID, id string) (*Event, error) {
+	return b.store.Get(ctx, userID, id)
+}
+
+// CreateEventJSON adds an event to userID's calendar calendarID (their local
+// calendar when empty) and pushes it to the remote calendar behind it.
+func (b *CalDAVBackend) CreateEventJSON(ctx context.Context, userID, calendarID, title, description, location, timezone string, start, end time.Time, allDay bool) (*Event, error) {
+	var cal *Calendar
+	var err error
+	if calendarID == "" {
+		cal, err = b.store.EnsureLocalCalendar(ctx, userID)
+	} else {
+		cal, err = b.store.GetCalendar(ctx, userID, calendarID)
+	}
 	if err != nil {
 		return nil, err
 	}
-
-	uid := existing.RemoteUID
-	if uid == "" {
-		uid = existing.ID + "@localitas"
+	uid := newEventUID()
+	e, err := b.store.Create(ctx, cal, uid, title, description, location, timezone, start, end, allDay)
+	if err != nil {
+		return nil, err
 	}
+	b.pushToRemote(ctx, userID, cal, uid, title, description, location, start, end, allDay)
+	return b.store.Get(ctx, userID, e.ID)
+}
 
-	cal := buildICalEvent(uid, title, description, location, existing.Timezone, start, end, allDay)
-	calID := existing.CalendarID
-	if calID == "" {
-		calID = "local"
+// UpdateEventJSON rewrites userID's event id and pushes it to the remote
+// calendar behind it.
+func (b *CalDAVBackend) UpdateEventJSON(ctx context.Context, userID, id, title, description, location string, start, end time.Time, allDay bool) (*Event, error) {
+	existing, err := b.store.Get(ctx, userID, id)
+	if err != nil {
+		return nil, err
 	}
-	path := "/caldav/" + calID + "/" + uid + ".ics"
-	b.PutCalendarObject(ctx, path, cal, nil)
+	if err := b.store.Update(ctx, userID, id, title, description, location, start, end, allDay); err != nil {
+		return nil, err
+	}
+	if existing.RemoteUID != "" {
+		cal, err := b.store.GetCalendar(ctx, userID, existing.CalendarID)
+		if err != nil {
+			return nil, err
+		}
+		b.pushToRemote(ctx, userID, cal, existing.RemoteUID, title, description, location, start, end, allDay)
+	}
+	return b.store.Get(ctx, userID, id)
+}
 
-	if existing.RemoteUID != "" && existing.CalendarID != "" {
-		storedCal, _ := b.store.GetCalendar(ctx, existing.CalendarID)
-		if storedCal != nil {
-			account, err := b.store.GetAccount(ctx, storedCal.AccountID)
-			if err != nil {
-				logger.Error("remote sync skipped: cannot load account", "account_id", storedCal.AccountID, "error", err)
-			} else {
-				syncEventToRemote(ctx, b.store, account, storedCal, existing.RemoteUID, title, description, location, start, end, allDay)
+// DeleteEventJSON removes userID's event id, and its remote copy.
+func (b *CalDAVBackend) DeleteEventJSON(ctx context.Context, userID, id string) error {
+	existing, err := b.store.Get(ctx, userID, id)
+	if err != nil {
+		return err
+	}
+	if existing.RemoteUID != "" {
+		cal, err := b.store.GetCalendar(ctx, userID, existing.CalendarID)
+		if err != nil {
+			return err
+		}
+		remote, err := remoteClientForCalendar(ctx, b.store, userID, cal)
+		if err != nil {
+			logger.Error("remote delete skipped", "event_id", existing.ID, "error", err)
+		} else if remote != nil {
+			if err := remote.DeleteEvent(ctx, existing.RemoteUID); err != nil {
+				logger.Error("remote delete failed", "event_id", existing.ID, "error", err)
 			}
 		}
 	}
-
-	return b.store.Get(ctx, id)
+	return b.store.Delete(ctx, userID, id)
 }
 
-func (b *CalDAVBackend) DeleteEventJSON(ctx context.Context, id string) error {
-	existing, _ := b.store.Get(ctx, id)
-	if existing == nil {
-		return b.store.Delete(ctx, id)
+func (b *CalDAVBackend) SearchEvents(ctx context.Context, userID, query string, limit int) ([]*Event, error) {
+	return b.store.Search(ctx, userID, query, limit)
+}
+
+// pushToRemote writes an event to the remote calendar behind cal. The local
+// write has already succeeded, so a failed push is logged rather than
+// failing the request; the next sync reconciles.
+func (b *CalDAVBackend) pushToRemote(ctx context.Context, userID string, cal *Calendar, uid, title, description, location string, start, end time.Time, allDay bool) {
+	remote, err := remoteClientForCalendar(ctx, b.store, userID, cal)
+	if err != nil {
+		logger.Error("remote push skipped", "calendar_id", cal.ID, "error", err)
+		return
 	}
-
-	if existing.RemoteUID != "" && existing.CalendarID != "" {
-		caldavClient, err := getCalDAVClientForEvent(ctx, b.store, existing)
-		if err != nil {
-			logger.Error("remote delete skipped", "event_id", existing.ID, "error", err)
-		} else if caldavClient != nil {
-			caldavClient.DeleteEvent(ctx, existing.RemoteUID)
-		}
-
-		uid := existing.RemoteUID
-		calID := existing.CalendarID
-		path := "/caldav/" + calID + "/" + uid + ".ics"
-		b.DeleteCalendarObject(ctx, path)
-		return nil
+	if remote == nil {
+		return
 	}
-
-	return b.store.Delete(ctx, id)
-}
-
-func (b *CalDAVBackend) SearchEvents(ctx context.Context, query string, limit int) ([]*Event, error) {
-	return b.store.Search(ctx, query, limit)
-}
-
-func buildICalEvent(uid, title, description, location, timezone string, start, end time.Time, allDay bool) *ical.Calendar {
-	e := &Event{
-		RemoteUID:   uid,
-		Title:       title,
-		Description: description,
-		Location:    location,
-		Timezone:    timezone,
-		StartTime:   start,
-		EndTime:     end,
-		AllDay:      allDay,
-		UpdatedAt:   time.Now().UTC(),
-	}
-	return eventToICalendar(e)
-}
-
-func syncEventToRemote(ctx context.Context, store *Store, account *CalendarAccount, cal *Calendar, uid, title, description, location string, start, end time.Time, allDay bool) {
-	if account.NeedsOAuth() {
-		fullAcct, err := store.GetAccountWithTokens(ctx, account.ID)
-		if err != nil {
-			return
-		}
-		if err := EnsureValidToken(ctx, store, fullAcct); err != nil {
-			return
-		}
-		caldavClient := NewCalDAVClientWithBearer(cal.Href, fullAcct.AccessToken)
-		caldavClient.UpdateEvent(ctx, uid, title, description, location, start, end, allDay)
-	} else if account.CalDAVURL != "" {
-		caldavClient := NewCalDAVClient(account.CalDAVURL, account.Username, account.Password)
-		caldavClient.UpdateEvent(ctx, uid, title, description, location, start, end, allDay)
+	if err := remote.UpdateEvent(ctx, uid, title, description, location, start, end, allDay); err != nil {
+		logger.Error("remote push failed", "calendar_id", cal.ID, "uid", uid, "error", err)
 	}
 }
 
 func extractCalendarID(path string) string {
-	path = strings.TrimPrefix(path, "/caldav/")
-	path = strings.TrimSuffix(path, "/")
-	parts := strings.Split(path, "/")
-	if len(parts) >= 1 && parts[0] != "" {
-		return parts[0]
+	if !strings.HasPrefix(path, caldavHome) {
+		return ""
 	}
-	return ""
+	id, _, _ := strings.Cut(strings.TrimPrefix(path, caldavHome), "/")
+	return id
 }
 
 func extractEventUID(path string) string {
-	path = strings.TrimPrefix(path, "/caldav/")
-	parts := strings.Split(path, "/")
-	if len(parts) >= 2 {
-		name := parts[len(parts)-1]
-		return strings.TrimSuffix(name, ".ics")
+	if !strings.HasPrefix(path, caldavHome) {
+		return ""
 	}
-	return ""
+	parts := strings.Split(strings.TrimPrefix(path, caldavHome), "/")
+	if len(parts) < 2 || parts[1] == "" {
+		return ""
+	}
+	return strings.TrimSuffix(parts[1], ".ics")
 }
 
 func eventToICalendar(e *Event) *ical.Calendar {

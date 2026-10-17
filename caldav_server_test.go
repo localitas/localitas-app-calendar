@@ -13,10 +13,11 @@ func TestExtractCalendarID(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/caldav/abc123/", "abc123"},
-		{"/caldav/abc123/event.ics", "abc123"},
-		{"/caldav/", ""},
-		{"/caldav/abc123", "abc123"},
+		{"/caldav/me/calendars/abc123/", "abc123"},
+		{"/caldav/me/calendars/abc123/event.ics", "abc123"},
+		{"/caldav/me/calendars/", ""},
+		{"/caldav/me/calendars/abc123", "abc123"},
+		{"/caldav/abc123/", ""},
 	}
 	for _, tt := range tests {
 		got := extractCalendarID(tt.path)
@@ -31,10 +32,10 @@ func TestExtractEventUID(t *testing.T) {
 		path string
 		want string
 	}{
-		{"/caldav/abc123/myevent@localitas.ics", "myevent@localitas"},
-		{"/caldav/abc123/simple.ics", "simple"},
-		{"/caldav/abc123/", ""},
-		{"/caldav/", ""},
+		{"/caldav/me/calendars/abc123/myevent@localitas.ics", "myevent@localitas"},
+		{"/caldav/me/calendars/abc123/simple.ics", "simple"},
+		{"/caldav/me/calendars/abc123/", ""},
+		{"/caldav/me/calendars/", ""},
 	}
 	for _, tt := range tests {
 		got := extractEventUID(tt.path)
@@ -124,7 +125,7 @@ func TestEventToCalendarObject(t *testing.T) {
 		UpdatedAt: time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
 	}
 
-	obj := eventToCalendarObject(e, "/caldav/cal1/")
+	obj := eventToCalendarObject(e, "/caldav/me/calendars/cal1/")
 
 	if !strings.HasSuffix(obj.Path, "obj-uid@localitas.ics") {
 		t.Errorf("Path = %s", obj.Path)

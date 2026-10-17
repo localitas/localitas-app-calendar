@@ -682,9 +682,6 @@
                             }
                             fetch('api/reminders/' + p.reminder_id, {method: 'DELETE'}).catch(function(){});
                         });
-                        pending.forEach(function(p) {
-                            fetch('api/events/' + p.reminder_id + '/reminders').catch(function(){});
-                        });
                     })
                     .catch(function() {});
             }, 60000);
@@ -854,7 +851,7 @@
 
         async function syncAll() {
             try {
-                const resp = await fetch('api/sync', {method:'POST'});
+                const resp = await fetch('api/accounts/sync', {method:'POST'});
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
                 await loadAccounts();

@@ -23,7 +23,7 @@ build-linux: lint
 	go build -o bin/calendar-server ./cmd/calendar-server
 
 test: lint
-	go test -v ./...
+	CGO_ENABLED=1 go test -tags fts5 -v ./...
 
 lint:
 	@echo "Running gofmt..."

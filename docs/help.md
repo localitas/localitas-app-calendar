@@ -42,11 +42,11 @@ Connect external CalDAV accounts (Google Calendar, iCloud, etc.) to sync events 
 **GET /api/accounts** - List CalDAV accounts
 **POST /api/accounts** - Add a CalDAV account
 **POST /api/accounts/{id}/sync** - Sync a single account
-**POST /api/sync** - Sync all accounts
+**POST /api/accounts/sync** - Sync all of your accounts
 
 ## CalDAV Server
 
-The app exposes a CalDAV server at `/caldav/` for external calendar clients. The well-known endpoint `/.well-known/caldav` redirects to it.
+The app exposes a CalDAV server at `/caldav/` for external calendar clients; it requires a signed-in user and shows only that user's calendars. The well-known endpoint `/.well-known/caldav` redirects to it.
 
 ## Search
 
