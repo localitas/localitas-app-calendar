@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/localitas/localitas-go"
+	"github.com/localitas/localitas-go/identitytest"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -28,16 +29,35 @@ const testAPIToken = "calendar-test-api-token"
 // fast without leaving the machine.
 const unreachableDAV = "http://127.0.0.1:1/dav/"
 
+// signer signs identity tokens as core does; the app verifies them with its
+// public key and refuses legacy (api_token-derived HMAC) tokens. It is set
+// up with the package's variables, before the tokens below are signed.
+var signer = mustInstallSigner()
+
+func mustInstallSigner() *identitytest.Signer {
+	s, err := identitytest.Install()
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
 func TestMain(m *testing.M) {
 	os.Setenv("LOCALITAS_API_TOKEN", testAPIToken)
 	os.Setenv("LOCALITAS_SECRET_KEY", "0123456789abcdef0123456789abcdef")
-	client.SetIdentityKeyFromAPIToken(testAPIToken)
 	os.Exit(m.Run())
 }
 
 // identity signs claims the way core does for a request it forwards.
+// identity signs claims the way core does for a request it forwards; under
+// another cluster's api_token it is what that cluster's apps could sign with
+// the legacy derived key, which this app must refuse.
 func identity(apiToken, userID string, scope client.Scope) string {
-	raw, _ := json.Marshal(client.TokenInfo{UserID: userID, Email: userID + "@example.com", Permission: string(scope)})
+	info := client.TokenInfo{UserID: userID, Email: userID + "@example.com", Permission: string(scope)}
+	if apiToken == testAPIToken {
+		return signer.Token(info)
+	}
+	raw, _ := json.Marshal(info)
 	payload := base64.RawURLEncoding.EncodeToString(raw)
 	sum := sha256.Sum256([]byte("localitas-internal-token-v1:" + apiToken))
 	mac := hmac.New(sha256.New, []byte(base64.StdEncoding.EncodeToString(sum[:])))
