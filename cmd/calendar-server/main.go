@@ -33,7 +33,7 @@ func main() {
 	app := &cli.Command{
 		Name:    "calendar-server",
 		Usage:   "Calendar app server",
-		Version: version,
+		Version: version + " (" + commit + ")",
 		Commands: []*cli.Command{
 			serveCommand(),
 			migrateCommand(),
