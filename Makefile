@@ -33,11 +33,7 @@ lint:
 
 strict-lint: lint
 	@echo "Running staticcheck..."
-	@if ! command -v staticcheck > /dev/null 2>&1; then \
-		echo "Installing staticcheck..."; \
-		go install honnef.co/go/tools/cmd/staticcheck@latest; \
-	fi
-	@staticcheck ./...
+	@go tool staticcheck ./...
 	@echo "staticcheck passed"
 
 swagger:
