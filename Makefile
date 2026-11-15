@@ -76,9 +76,12 @@ build-docker: build-linux
 	docker build -t calendar:latest .
 
 start-docker: build-docker stop-docker
-	@docker run -d -p $(PORT):8000 --name calendar \
+	@docker run -d -p $(PORT):8000 --name $(APP_NAME) \
 		--log-opt max-size=10m --log-opt max-file=7 \
-		calendar:latest
+		--label localitas.app=true \
+		-e LOCALITAS_API_TOKEN \
+		--add-host host.docker.internal:host-gateway \
+		$(APP_NAME):latest serve --listen :8000 --base-path $(BASE_PATH)
 	@echo "Waiting for calendar to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		curl -sf http://localhost:$(PORT)/health.json > /dev/null 2>&1 && break; \
