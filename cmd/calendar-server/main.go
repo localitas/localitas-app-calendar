@@ -117,18 +117,15 @@ func serveAction(ctx context.Context, cmd *cli.Command) error {
 		logger.Error("service registry failed", "error", err)
 	}
 
-	shutdown, err := calendar.BroadcastMDNS(addr.Port, calendar.DefaultHealth.Name)
-	if err != nil {
-		logger.Error("mDNS broadcast failed", "error", err)
-	}
+	announcement := c.Announce(ln)
 
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 		<-sig
 		logger.Info("shutting down")
-		if shutdown != nil {
-			shutdown()
+		if err := announcement.Withdraw(); err != nil {
+			logger.Error("withdraw from core failed", "error", err)
 		}
 		os.Exit(0)
 	}()

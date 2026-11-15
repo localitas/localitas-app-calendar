@@ -2,15 +2,7 @@ package calendar
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
-
-	"github.com/grandcat/zeroconf"
-)
-
-const (
-	AppServiceType   = "_localitas-app._tcp"
-	AppServiceDomain = "local."
 )
 
 type AppHealth struct {
@@ -32,14 +24,4 @@ var DefaultHealth = AppHealth{
 func HandleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(DefaultHealth)
-}
-
-func BroadcastMDNS(port int, name string) (shutdown func(), err error) {
-	txt := []string{fmt.Sprintf("name=%s", name)}
-	server, err := zeroconf.Register(name, AppServiceType, AppServiceDomain, port, txt, nil)
-	if err != nil {
-		return nil, fmt.Errorf("mDNS register: %w", err)
-	}
-	logger.Info("broadcasting mDNS", "service_type", AppServiceType, "port", port, "name", name)
-	return server.Shutdown, nil
 }
