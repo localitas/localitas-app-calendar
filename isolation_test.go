@@ -471,10 +471,16 @@ func TestCronRoutesAreSystemOnlyAndActForEveryUser(t *testing.T) {
 
 	w := env.do("POST", "/api/reminders/check", testAPIToken, "")
 	env.expect(w, http.StatusOK, "system checks reminders")
-	if checked := decode[struct {
-		Checked int `json:"checked"`
-	}](t, w); checked.Checked != 2 {
-		t.Fatalf("checked %d reminders, want both users' 2", checked.Checked)
+	assertWireKeys(t, w.Body.Bytes(), "checked", "reminders")
+	var checked ReminderCheckResult
+	strictDecode(t, w.Body.Bytes(), &checked)
+	if checked.Checked != 2 || len(checked.Reminders) != 2 {
+		t.Fatalf("checked %+v, want both users' 2 reminders", checked)
+	}
+	for _, p := range checked.Reminders {
+		if want := map[string]string{"alice": a.reminder.ID, "bob": b.reminder.ID}[p.UserID]; p.ReminderID != want || p.MinutesBefore != 15 || p.EventTitle != p.UserID+" standup" {
+			t.Fatalf("checked reminder %+v", p)
+		}
 	}
 	if rems, _ := env.store.GetAllPendingReminders(ctx); len(rems) != 0 {
 		t.Fatalf("pending reminders after check = %d", len(rems))
@@ -482,11 +488,16 @@ func TestCronRoutesAreSystemOnlyAndActForEveryUser(t *testing.T) {
 
 	w = env.do("POST", "/api/sync", testAPIToken, "")
 	env.expect(w, http.StatusOK, "system syncs")
-	if synced := decode[struct {
-		Accounts int      `json:"accounts"`
-		Errors   []string `json:"errors"`
-	}](t, w); synced.Accounts != 2 || len(synced.Errors) != 2 {
+	assertWireKeys(t, w.Body.Bytes(), "accounts", "new_events", "errors")
+	var synced SyncResult
+	strictDecode(t, w.Body.Bytes(), &synced)
+	if synced.Accounts != 2 || synced.NewEvents != 0 || len(synced.Errors) != 2 {
 		t.Fatalf("system sync = %+v, want both users' accounts attempted", synced)
+	}
+	for _, e := range synced.Errors {
+		if !strings.HasPrefix(e, "alice dav: ") && !strings.HasPrefix(e, "bob dav: ") {
+			t.Fatalf("system sync error %q is not an account's", e)
+		}
 	}
 	for user, acct := range map[string]*CalendarAccount{"alice": a.account, "bob": b.account} {
 		got, err := env.store.GetAccount(ctx, user, acct.ID)
@@ -507,10 +518,11 @@ func TestUserSyncTouchesOnlyTheCallersAccounts(t *testing.T) {
 
 	w := env.do("POST", "/api/accounts/sync", alice, "")
 	env.expect(w, http.StatusOK, "alice syncs her accounts")
-	if synced := decode[struct {
-		Accounts int `json:"accounts"`
-	}](t, w); synced.Accounts != 1 {
-		t.Fatalf("alice's sync covered %d accounts, want 1", synced.Accounts)
+	assertWireKeys(t, w.Body.Bytes(), "accounts", "new_events", "errors")
+	var synced SyncResult
+	strictDecode(t, w.Body.Bytes(), &synced)
+	if synced.Accounts != 1 || synced.NewEvents != 0 || len(synced.Errors) != 1 || !strings.HasPrefix(synced.Errors[0], "alice dav: ") {
+		t.Fatalf("alice's sync = %+v, want her one account attempted", synced)
 	}
 	got, err := env.store.GetAccount(ctx, "bob", b.account.ID)
 	if err != nil {
