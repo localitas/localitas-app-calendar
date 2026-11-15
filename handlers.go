@@ -335,9 +335,15 @@ func (h *handler) syncAccount(ctx context.Context, a *CalendarAccount) (int, err
 	return n, syncErr
 }
 
+type SyncResult struct {
+	Accounts  int      `json:"accounts"`
+	NewEvents int      `json:"new_events"`
+	Errors    []string `json:"errors"`
+}
+
 // syncAccounts syncs every active account in accounts, collecting the
 // failures per account.
-func (h *handler) syncAccounts(ctx context.Context, accounts []*CalendarAccount) map[string]interface{} {
+func (h *handler) syncAccounts(ctx context.Context, accounts []*CalendarAccount) SyncResult {
 	totalNew := 0
 	syncErrors := make([]string, 0)
 	for _, a := range accounts {
@@ -350,11 +356,7 @@ func (h *handler) syncAccounts(ctx context.Context, accounts []*CalendarAccount)
 			syncErrors = append(syncErrors, a.Name+": "+err.Error())
 		}
 	}
-	return map[string]interface{}{
-		"accounts":   len(accounts),
-		"new_events": totalNew,
-		"errors":     syncErrors,
-	}
+	return SyncResult{Accounts: len(accounts), NewEvents: totalNew, Errors: syncErrors}
 }
 
 // handleSyncMine syncs the caller's accounts.
@@ -369,15 +371,15 @@ func (h *handler) handleSyncMine(w http.ResponseWriter, r *http.Request) {
 
 // handleSyncAll is the system sync job: it syncs every user's accounts.
 func (h *handler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
-	work := func(ctx context.Context) (map[string]interface{}, error) {
+	work := func(ctx context.Context) (SyncResult, error) {
 		accounts, err := h.app.Store.ListAllAccounts(ctx)
 		if err != nil {
-			return nil, err
+			return SyncResult{}, err
 		}
 		return h.syncAccounts(ctx, accounts), nil
 	}
 
-	if h.app.client.RunAsync(w, r, work) {
+	if client.RunAsync(h.app.client, w, r, work) {
 		return
 	}
 
@@ -526,26 +528,28 @@ func (h *handler) handlePendingReminders(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, r, http.StatusOK, pending)
 }
 
+type ReminderCheckResult struct {
+	Checked   int                `json:"checked"`
+	Reminders []*PendingReminder `json:"reminders"`
+}
+
 // handleCheckReminders is the system reminder job: it marks every user's
 // due reminders notified and reports them.
 func (h *handler) handleCheckReminders(w http.ResponseWriter, r *http.Request) {
-	work := func(ctx context.Context) (map[string]interface{}, error) {
+	work := func(ctx context.Context) (ReminderCheckResult, error) {
 		pending, err := h.app.Store.GetAllPendingReminders(ctx)
 		if err != nil {
-			return nil, err
+			return ReminderCheckResult{}, err
 		}
 		for _, p := range pending {
 			if err := h.app.Store.MarkReminderNotified(ctx, p.ReminderID); err != nil {
-				return nil, fmt.Errorf("mark reminder %s notified: %w", p.ReminderID, err)
+				return ReminderCheckResult{}, fmt.Errorf("mark reminder %s notified: %w", p.ReminderID, err)
 			}
 		}
-		return map[string]interface{}{
-			"checked":   len(pending),
-			"reminders": pending,
-		}, nil
+		return ReminderCheckResult{Checked: len(pending), Reminders: pending}, nil
 	}
 
-	if h.app.client.RunAsync(w, r, work) {
+	if client.RunAsync(h.app.client, w, r, work) {
 		return
 	}
 
