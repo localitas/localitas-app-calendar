@@ -2,8 +2,7 @@ package calendar
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
+	"crypto/ed25519"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -30,9 +29,13 @@ const testAPIToken = "calendar-test-api-token"
 const unreachableDAV = "http://127.0.0.1:1/dav/"
 
 // signer signs identity tokens as core does; the app verifies them with its
-// public key and refuses legacy (api_token-derived HMAC) tokens. It is set
-// up with the package's variables, before the tokens below are signed.
+// public key. It is set up with the package's variables, before the tokens
+// below are signed.
 var signer = mustInstallSigner()
+
+// otherClusterKey is another cluster's identity key: the tokens it signs are
+// well formed, but this app does not trust it.
+var otherClusterKey = ed25519.NewKeyFromSeed([]byte("calendar-test-other-cluster-seed"))
 
 func mustInstallSigner() *identitytest.Signer {
 	s, err := identitytest.Install()
@@ -49,25 +52,31 @@ func TestMain(m *testing.M) {
 }
 
 // identity signs claims the way core does for a request it forwards.
-// identity signs claims the way core does for a request it forwards; under
-// another cluster's api_token it is what that cluster's apps could sign with
-// the legacy derived key, which this app must refuse.
-func identity(apiToken, userID string, scope client.Scope) string {
-	info := client.TokenInfo{UserID: userID, Email: userID + "@example.com", Permission: string(scope)}
-	if apiToken == testAPIToken {
-		return signer.Token(info)
+func identity(userID string, scope client.Scope) string {
+	return signer.Token(client.TokenInfo{UserID: userID, Email: userID + "@example.com", Permission: string(scope)})
+}
+
+// otherClusterIdentity signs claims the way another cluster's core does,
+// with its own key, which this app must refuse.
+func otherClusterIdentity(userID string, scope client.Scope) string {
+	now := time.Now().UTC()
+	info := client.TokenInfo{
+		UserID:     userID,
+		Email:      userID + "@example.com",
+		Permission: string(scope),
+		IssuedAt:   now.Unix(),
+		ExpiresAt:  now.Add(5 * time.Minute).Unix(),
+		MaxExpiry:  now.Add(24 * time.Hour).Unix(),
+		KeyID:      client.Ed25519KeyID(otherClusterKey.Public().(ed25519.PublicKey)),
 	}
 	raw, _ := json.Marshal(info)
 	payload := base64.RawURLEncoding.EncodeToString(raw)
-	sum := sha256.Sum256([]byte("localitas-internal-token-v1:" + apiToken))
-	mac := hmac.New(sha256.New, []byte(base64.StdEncoding.EncodeToString(sum[:])))
-	mac.Write([]byte(payload))
-	return payload + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	return payload + "." + base64.RawURLEncoding.EncodeToString(ed25519.Sign(otherClusterKey, []byte(payload)))
 }
 
 var (
-	alice = identity(testAPIToken, "alice", client.ScopeWrite)
-	bob   = identity(testAPIToken, "bob", client.ScopeWrite)
+	alice = identity("alice", client.ScopeWrite)
+	bob   = identity("bob", client.ScopeWrite)
 )
 
 type testEnv struct {
@@ -202,7 +211,7 @@ func eventIDs(t *testing.T, w *httptest.ResponseRecorder) map[string]bool {
 
 func TestUserRoutesRefuseRequestsWithoutVerifiedUser(t *testing.T) {
 	env := newTestEnv(t)
-	forged := identity("some-other-cluster", "alice", client.ScopeWrite)
+	forged := otherClusterIdentity("alice", client.ScopeWrite)
 	routes := []struct{ method, path string }{
 		{"GET", "/api/events"},
 		{"POST", "/api/events"},
@@ -241,7 +250,7 @@ func TestUserRoutesRefuseRequestsWithoutVerifiedUser(t *testing.T) {
 func TestReadScopeCannotChangeAnything(t *testing.T) {
 	env := newTestEnv(t)
 	a := env.seedUser("alice")
-	reader := identity(testAPIToken, "alice", client.ScopeRead)
+	reader := identity("alice", client.ScopeRead)
 
 	env.expect(env.do("GET", "/api/events/"+a.event.ID, reader, ""), http.StatusOK, "reader reads own event")
 	env.expect(env.do("POST", "/api/events", reader, `{"title":"x"}`), http.StatusForbidden, "reader creates event")
