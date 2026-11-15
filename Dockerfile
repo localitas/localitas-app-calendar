@@ -8,4 +8,7 @@ RUN chmod +x /usr/local/bin/app-server
 
 USER app
 
+HEALTHCHECK --interval=10s --timeout=10s --start-period=2m --start-interval=1s --retries=3 \
+  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000 && printf "GET /health.json HTTP/1.0\r\n\r\n" >&3 && IFS= read -r line <&3 && [[ $line == HTTP/*" 200"* ]]'
+
 ENTRYPOINT ["/usr/local/bin/app-server"]
