@@ -8,7 +8,7 @@
     <array>
         <string>${BIN_PATH}</string>
         <string>--listen</string>
-        <string>:${PORT}</string>
+        <string>127.0.0.1:${PORT}</string>
         <string>--base-path</string>
         <string>${BASE_PATH}</string>
     </array>
