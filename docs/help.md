@@ -70,7 +70,8 @@ bin/calendar-server --version
 # Native binary (bin/calendar-server)
 make build
 
-# Linux amd64 binary the Docker image is built from (calendar-server-linux-amd64)
+# Linux binary the Docker image is built from, for the Docker daemon's
+# architecture (calendar-server-linux-arm64 on Apple silicon); LINUX_ARCH=amd64 overrides
 make build-linux
 ```
 
