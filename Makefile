@@ -78,7 +78,7 @@ build-docker: build-linux
 	docker build --platform linux/$(LINUX_ARCH) -t calendar:latest .
 
 start-docker: build-docker stop-docker
-	@docker run -d -p $(PORT):8000 --name $(APP_NAME) \
+	@docker run -d -p 127.0.0.1:$(PORT):8000 --name $(APP_NAME) \
 		--log-opt max-size=10m --log-opt max-file=7 \
 		--label localitas.app=true \
 		-e LOCALITAS_API_TOKEN \
