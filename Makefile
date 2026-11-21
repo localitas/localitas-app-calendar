@@ -13,6 +13,14 @@ WORK_DIR := $(shell pwd)
 # The home of the core this app reaches (its core.env: CORE_URL and the API
 # token, written by core each time it serves). Another core: LOCALITAS_HOME=<dir>.
 LOCALITAS_HOME ?= $(HOME)/.localitas
+# The localitas CLI, from the SDK this app builds with; start-docker gives the
+# container core's address and token from it (core-env --for container).
+LOCALITAS ?= go run github.com/localitas/localitas-go/cmd/localitas
+# The image start-docker builds and runs, the container's name, and extra
+# docker run flags (a test labels its container for no cluster).
+IMAGE ?= $(APP_NAME):latest
+CONTAINER ?= $(APP_NAME)
+DOCKER_RUN_ARGS ?=
 # The Docker daemon's architecture: the image's base is pulled for it, so the
 # Linux binary is built for it too and runs natively, not under emulation.
 LINUX_ARCH ?= $(strip $(shell docker version --format '{{.Server.Arch}}' 2>/dev/null || go env GOARCH))
@@ -81,15 +89,17 @@ logs-err:
 # ── Docker ────────────────────────────────────────────────────
 
 build-docker: build-linux
-	docker build --platform linux/$(LINUX_ARCH) -t calendar:latest .
+	docker build --platform linux/$(LINUX_ARCH) -t $(IMAGE) .
 
 start-docker: build-docker stop-docker
-	@docker run -d -p 127.0.0.1:$(PORT):8000 --name $(APP_NAME) \
+	@env_file=$$(mktemp) && trap 'rm -f "$$env_file"' EXIT && \
+		LOCALITAS_HOME=$(LOCALITAS_HOME) $(LOCALITAS) core-env --for container > "$$env_file" && \
+		docker run -d -p 127.0.0.1:$(PORT):8000 --name $(CONTAINER) \
 		--log-opt max-size=10m --log-opt max-file=7 \
 		--label localitas.app=true \
-		-e LOCALITAS_API_TOKEN \
+		--env-file "$$env_file" $(DOCKER_RUN_ARGS) \
 		--add-host host.docker.internal:host-gateway \
-		$(APP_NAME):latest serve --listen :8000 --base-path $(BASE_PATH)
+		$(IMAGE) serve --listen :8000 --base-path $(BASE_PATH)
 	@echo "Waiting for calendar to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		curl -sf http://localhost:$(PORT)/health.json > /dev/null 2>&1 && break; \
@@ -98,12 +108,12 @@ start-docker: build-docker stop-docker
 	@echo "calendar running in Docker on port $(PORT)"
 
 stop-docker:
-	@docker rm -f calendar 2>/dev/null || true
+	@docker rm -f $(CONTAINER) 2>/dev/null || true
 
 restart-docker: stop-docker start-docker
 
 logs-docker:
-	@docker logs -f calendar
+	@docker logs -f $(CONTAINER)
 
 
 # ── Release ───────────────────────────────────────────────────
