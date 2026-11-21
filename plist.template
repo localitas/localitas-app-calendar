@@ -7,6 +7,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>${BIN_PATH}</string>
+        <string>serve</string>
         <string>--listen</string>
         <string>127.0.0.1:${PORT}</string>
         <string>--base-path</string>
@@ -18,6 +19,11 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LOCALITAS_HOME</key>
+            <string>${LOCALITAS_HOME}</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/stdout.log</string>
     <key>StandardErrorPath</key>

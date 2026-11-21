@@ -1,4 +1,4 @@
-.PHONY: build test install uninstall start stop restart status logs logs-err \
+.PHONY: build test check-core install uninstall start stop restart status logs logs-err \
        build-docker start-docker stop-docker restart-docker logs-docker \
        docker-push lint strict-lint swagger
 
@@ -10,6 +10,17 @@ PLIST_FILE := $(HOME)/Library/LaunchAgents/$(PLIST_NAME).plist
 LOG_DIR := $(HOME)/.localitas/logs/calendar
 BIN_PATH := $(shell pwd)/bin/calendar-server
 WORK_DIR := $(shell pwd)
+# The home of the core this app reaches (its core.env: CORE_URL and the API
+# token, written by core each time it serves). Another core: LOCALITAS_HOME=<dir>.
+LOCALITAS_HOME ?= $(HOME)/.localitas
+# The localitas CLI, from the SDK this app builds with; start-docker gives the
+# container core's address and token from it (core-env --for container).
+LOCALITAS ?= go run github.com/localitas/localitas-go/cmd/localitas
+# The image start-docker builds and runs, the container's name, and extra
+# docker run flags (a test labels its container for no cluster).
+IMAGE ?= $(APP_NAME):latest
+CONTAINER ?= $(APP_NAME)
+DOCKER_RUN_ARGS ?=
 # The Docker daemon's architecture: the image's base is pulled for it, so the
 # Linux binary is built for it too and runs natively, not under emulation.
 LINUX_ARCH ?= $(strip $(shell docker version --format '{{.Server.Arch}}' 2>/dev/null || go env GOARCH))
@@ -43,9 +54,12 @@ swagger:
 
 # ── Native (launchd) ─────────────────────────────────────────
 
-install: build
+check-core:
+	@test -n "$(CORE_URL)" -o -f "$(LOCALITAS_HOME)/core.env" || { echo "No core: $(LOCALITAS_HOME)/core.env is missing. Start core, or set LOCALITAS_HOME to the home of the core to reach."; exit 1; }
+
+install: build check-core
 	@mkdir -p $(LOG_DIR)
-	@sed 's|$${BIN_PATH}|$(BIN_PATH)|g; s|$${PORT}|$(PORT)|g; s|$${BASE_PATH}|$(BASE_PATH)|g; s|$${LOG_DIR}|$(LOG_DIR)|g; s|$${WORK_DIR}|$(WORK_DIR)|g' \
+	@sed 's|$${BIN_PATH}|$(BIN_PATH)|g; s|$${PORT}|$(PORT)|g; s|$${BASE_PATH}|$(BASE_PATH)|g; s|$${LOG_DIR}|$(LOG_DIR)|g; s|$${LOCALITAS_HOME}|$(LOCALITAS_HOME)|g; s|$${WORK_DIR}|$(WORK_DIR)|g' \
 		plist.template > $(PLIST_FILE)
 	@echo "Installed launchd service: $(PLIST_NAME)"
 
@@ -75,15 +89,17 @@ logs-err:
 # ── Docker ────────────────────────────────────────────────────
 
 build-docker: build-linux
-	docker build --platform linux/$(LINUX_ARCH) -t calendar:latest .
+	docker build --platform linux/$(LINUX_ARCH) -t $(IMAGE) .
 
 start-docker: build-docker stop-docker
-	@docker run -d -p 127.0.0.1:$(PORT):8000 --name $(APP_NAME) \
+	@env_file=$$(mktemp) && trap 'rm -f "$$env_file"' EXIT && \
+		LOCALITAS_HOME=$(LOCALITAS_HOME) $(LOCALITAS) core-env --for container > "$$env_file" && \
+		docker run -d -p 127.0.0.1:$(PORT):8000 --name $(CONTAINER) \
 		--log-opt max-size=10m --log-opt max-file=7 \
 		--label localitas.app=true \
-		-e LOCALITAS_API_TOKEN \
+		--env-file "$$env_file" $(DOCKER_RUN_ARGS) \
 		--add-host host.docker.internal:host-gateway \
-		$(APP_NAME):latest serve --listen :8000 --base-path $(BASE_PATH)
+		$(IMAGE) serve --listen :8000 --base-path $(BASE_PATH)
 	@echo "Waiting for calendar to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		curl -sf http://localhost:$(PORT)/health.json > /dev/null 2>&1 && break; \
@@ -92,12 +108,12 @@ start-docker: build-docker stop-docker
 	@echo "calendar running in Docker on port $(PORT)"
 
 stop-docker:
-	@docker rm -f calendar 2>/dev/null || true
+	@docker rm -f $(CONTAINER) 2>/dev/null || true
 
 restart-docker: stop-docker start-docker
 
 logs-docker:
-	@docker logs -f calendar
+	@docker logs -f $(CONTAINER)
 
 
 # ── Release ───────────────────────────────────────────────────
