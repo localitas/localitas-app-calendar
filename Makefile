@@ -1,4 +1,4 @@
-.PHONY: build test install uninstall start stop restart status logs logs-err \
+.PHONY: build test check-core install uninstall start stop restart status logs logs-err \
        build-docker start-docker stop-docker restart-docker logs-docker \
        docker-push lint strict-lint swagger
 
@@ -10,6 +10,9 @@ PLIST_FILE := $(HOME)/Library/LaunchAgents/$(PLIST_NAME).plist
 LOG_DIR := $(HOME)/.localitas/logs/calendar
 BIN_PATH := $(shell pwd)/bin/calendar-server
 WORK_DIR := $(shell pwd)
+# The home of the core this app reaches (its core.env: CORE_URL and the API
+# token, written by core each time it serves). Another core: LOCALITAS_HOME=<dir>.
+LOCALITAS_HOME ?= $(HOME)/.localitas
 # The Docker daemon's architecture: the image's base is pulled for it, so the
 # Linux binary is built for it too and runs natively, not under emulation.
 LINUX_ARCH ?= $(strip $(shell docker version --format '{{.Server.Arch}}' 2>/dev/null || go env GOARCH))
@@ -43,9 +46,12 @@ swagger:
 
 # ── Native (launchd) ─────────────────────────────────────────
 
-install: build
+check-core:
+	@test -n "$(CORE_URL)" -o -f "$(LOCALITAS_HOME)/core.env" || { echo "No core: $(LOCALITAS_HOME)/core.env is missing. Start core, or set LOCALITAS_HOME to the home of the core to reach."; exit 1; }
+
+install: build check-core
 	@mkdir -p $(LOG_DIR)
-	@sed 's|$${BIN_PATH}|$(BIN_PATH)|g; s|$${PORT}|$(PORT)|g; s|$${BASE_PATH}|$(BASE_PATH)|g; s|$${LOG_DIR}|$(LOG_DIR)|g; s|$${WORK_DIR}|$(WORK_DIR)|g' \
+	@sed 's|$${BIN_PATH}|$(BIN_PATH)|g; s|$${PORT}|$(PORT)|g; s|$${BASE_PATH}|$(BASE_PATH)|g; s|$${LOG_DIR}|$(LOG_DIR)|g; s|$${LOCALITAS_HOME}|$(LOCALITAS_HOME)|g; s|$${WORK_DIR}|$(WORK_DIR)|g' \
 		plist.template > $(PLIST_FILE)
 	@echo "Installed launchd service: $(PLIST_NAME)"
 

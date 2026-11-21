@@ -18,6 +18,11 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>LOCALITAS_HOME</key>
+            <string>${LOCALITAS_HOME}</string>
+    </dict>
     <key>StandardOutPath</key>
     <string>${LOG_DIR}/stdout.log</string>
     <key>StandardErrorPath</key>
