@@ -6,108 +6,74 @@ import (
 	"html/template"
 	"net/http"
 	"strings"
+
+	client "github.com/localitas/localitas-go"
 )
 
-type APIEndpoint struct {
-	Method      string     `json:"method"`
-	Path        string     `json:"path"`
-	Summary     string     `json:"summary"`
-	QueryParams []APIParam `json:"query_params,omitempty"`
-	RequestBody *APIBody   `json:"request_body,omitempty"`
-	Response    *APIBody   `json:"response,omitempty"`
-}
-
-type APIParam struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Required    bool   `json:"required"`
-	Description string `json:"description"`
-}
-
-type APIBody struct {
-	ContentType string `json:"content_type"`
-	Example     string `json:"example"`
-}
-
-type APIFieldDoc struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Example     string `json:"example"`
-}
-
-type APIDoc struct {
-	AppName     string        `json:"app_name"`
-	Version     string        `json:"version"`
-	Description string        `json:"description"`
-	Keywords    []string      `json:"keywords,omitempty"`
-	Fields      []APIFieldDoc `json:"fields,omitempty"`
-	Endpoints   []APIEndpoint `json:"endpoints"`
-}
-
-var CalendarAPIDoc = APIDoc{
+var CalendarAPIDoc = client.APISpec{
 	AppName:     "Calendar",
 	Version:     "0.1.0",
 	Description: "Event calendar with CRUD, date range queries, natural date parsing, and full-text search",
 	Keywords:    []string{"calendar", "event", "schedule", "appointment", "meeting", "reminder", "date", "time", "agenda", "booking", "availability"},
-	Fields: []APIFieldDoc{
+	Fields: []client.APIField{
 		{Name: "Date Formats", Description: "Supported date/time formats for creating events", Example: "RFC3339: 2026-04-23T14:00:00Z\nISO date: 2026-04-23\nDatetime-local: 2026-04-23T14:00"},
 		{Name: "Natural Dates", Description: "The parse-date endpoint understands natural language", Example: "today, tomorrow, yesterday\nnext monday, last friday\n3 days from now, 2 weeks ago\nJan 15, 2026"},
 		{Name: "All-Day Events", Description: "Set all_day: true for events spanning entire days", Example: "all_day: true\nstart_time: 2026-04-23\nend_time: 2026-04-23"},
 	},
-	Endpoints: []APIEndpoint{
+	Endpoints: []client.APIEndpoint{
 		{
 			Method:  "GET",
 			Path:    "/api/events",
 			Summary: "List events by date range",
-			QueryParams: []APIParam{
+			QueryParams: []client.APIParam{
 				{Name: "start", Type: "string", Description: "Start date YYYY-MM-DD (default: 7 days ago)"},
 				{Name: "end", Type: "string", Description: "End date YYYY-MM-DD (default: 14 days from now)"},
 			},
-			Response: &APIBody{ContentType: "application/json", Example: `{"days":[{"date":"2026-04-23","date_label":"Wednesday, April 23","events":[{"id":"abc...","title":"Meeting","start_time":"2026-04-23T14:00:00Z"}]}]}`},
+			Response: &client.APIBody{ContentType: "application/json", Example: `{"days":[{"date":"2026-04-23","date_label":"Wednesday, April 23","events":[{"id":"abc...","title":"Meeting","start_time":"2026-04-23T14:00:00Z"}]}]}`},
 		},
 		{
 			Method:      "POST",
 			Path:        "/api/events",
 			Summary:     "Create an event",
-			RequestBody: &APIBody{ContentType: "application/json", Example: `{"title":"Team Meeting","description":"Weekly sync","start_time":"2026-04-23T14:00:00Z","end_time":"2026-04-23T15:00:00Z","location":"Room 3","all_day":false}`},
-			Response:    &APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Team Meeting","start_time":"2026-04-23T14:00:00Z","end_time":"2026-04-23T15:00:00Z"}`},
+			RequestBody: &client.APIBody{ContentType: "application/json", Example: `{"title":"Team Meeting","description":"Weekly sync","start_time":"2026-04-23T14:00:00Z","end_time":"2026-04-23T15:00:00Z","location":"Room 3","all_day":false}`},
+			Response:    &client.APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Team Meeting","start_time":"2026-04-23T14:00:00Z","end_time":"2026-04-23T15:00:00Z"}`},
 		},
 		{
 			Method:   "GET",
 			Path:     "/api/events/{id}",
 			Summary:  "Get an event by ID",
-			Response: &APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Team Meeting","description":"Weekly sync","start_time":"2026-04-23T14:00:00Z"}`},
+			Response: &client.APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Team Meeting","description":"Weekly sync","start_time":"2026-04-23T14:00:00Z"}`},
 		},
 		{
 			Method:      "PUT",
 			Path:        "/api/events/{id}",
 			Summary:     "Update an event",
-			RequestBody: &APIBody{ContentType: "application/json", Example: `{"title":"Updated Meeting","start_time":"2026-04-23T15:00:00Z","end_time":"2026-04-23T16:00:00Z"}`},
-			Response:    &APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Updated Meeting"}`},
+			RequestBody: &client.APIBody{ContentType: "application/json", Example: `{"title":"Updated Meeting","start_time":"2026-04-23T15:00:00Z","end_time":"2026-04-23T16:00:00Z"}`},
+			Response:    &client.APIBody{ContentType: "application/json", Example: `{"id":"abc...","title":"Updated Meeting"}`},
 		},
 		{
 			Method:   "DELETE",
 			Path:     "/api/events/{id}",
 			Summary:  "Delete an event",
-			Response: &APIBody{ContentType: "application/json", Example: `{"success":true}`},
+			Response: &client.APIBody{ContentType: "application/json", Example: `{"success":true}`},
 		},
 		{
 			Method:  "GET",
 			Path:    "/api/search",
 			Summary: "Search events (FTS5)",
-			QueryParams: []APIParam{
+			QueryParams: []client.APIParam{
 				{Name: "q", Type: "string", Required: true, Description: "Search query"},
 			},
-			Response: &APIBody{ContentType: "application/json", Example: `[{"id":"abc...","title":"Team Meeting","location":"Room 3"}]`},
+			Response: &client.APIBody{ContentType: "application/json", Example: `[{"id":"abc...","title":"Team Meeting","location":"Room 3"}]`},
 		},
 		{
 			Method:  "GET",
 			Path:    "/api/parse-date",
 			Summary: "Parse natural language date",
-			QueryParams: []APIParam{
+			QueryParams: []client.APIParam{
 				{Name: "q", Type: "string", Required: true, Description: "Date expression (e.g. 'next friday', 'Jan 15')"},
 			},
-			Response: &APIBody{ContentType: "application/json", Example: `{"parsed":true,"input":"next friday","date":"2026-04-25","label":"Friday, April 25, 2026"}`},
+			Response: &client.APIBody{ContentType: "application/json", Example: `{"parsed":true,"input":"next friday","date":"2026-04-25","label":"Friday, April 25, 2026"}`},
 		},
 		{
 			Method:  "PROPFIND",
@@ -133,11 +99,10 @@ var CalendarAPIDoc = APIDoc{
 }
 
 func HandleSwagger(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(CalendarAPIDoc)
+	CalendarAPIDoc.ServeHTTP(w, r)
 }
 
-func RenderDocsHTML(doc APIDoc) template.HTML {
+func RenderDocsHTML(doc client.APISpec) template.HTML {
 	var sb strings.Builder
 	if len(doc.Fields) > 0 {
 		sb.WriteString(`<h3 style="font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); margin-bottom: 1rem;">Reference</h3><div class="accordion-list">`)

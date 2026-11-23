@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	client "github.com/localitas/localitas-go"
 )
 
 func TestHandleSwagger_ReturnsValidJSON(t *testing.T) {
@@ -16,7 +18,7 @@ func TestHandleSwagger_ReturnsValidJSON(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
-	var spec APIDoc
+	var spec client.APISpec
 	if err := json.Unmarshal(w.Body.Bytes(), &spec); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
