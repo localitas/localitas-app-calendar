@@ -51,7 +51,27 @@ func (h *handler) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{"days": days})
+	writeJSON(w, r, http.StatusOK, eventsResponse{Days: days})
+}
+
+// eventsResponse is GET /api/events' answer.
+type eventsResponse struct {
+	Days []DayEvents `json:"days" yaml:"days"`
+}
+
+// parseDateResponse is GET /api/parse-date's answer; date and label are
+// there only when the input parsed. Fields are in key order, as the map
+// this replaced marshaled them.
+type parseDateResponse struct {
+	Date   string `json:"date,omitempty" yaml:"date,omitempty"`
+	Input  string `json:"input" yaml:"input"`
+	Label  string `json:"label,omitempty" yaml:"label,omitempty"`
+	Parsed bool   `json:"parsed" yaml:"parsed"`
+}
+
+// syncAccountResponse is POST /api/accounts/{id}/sync's answer.
+type syncAccountResponse struct {
+	NewEvents int `json:"new_events" yaml:"new_events"`
 }
 
 func (h *handler) handleGetEvent(w http.ResponseWriter, r *http.Request) {
@@ -167,14 +187,14 @@ func (h *handler) handleParseDate(w http.ResponseWriter, r *http.Request) {
 	}
 	parsed, ok := ParseNaturalDate(query)
 	if !ok {
-		writeJSON(w, r, http.StatusOK, map[string]interface{}{"parsed": false, "input": query})
+		writeJSON(w, r, http.StatusOK, parseDateResponse{Input: query})
 		return
 	}
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{
-		"parsed": true,
-		"input":  query,
-		"date":   parsed.Format("2006-01-02"),
-		"label":  parsed.Format("Monday, January 2, 2006"),
+	writeJSON(w, r, http.StatusOK, parseDateResponse{
+		Parsed: true,
+		Input:  query,
+		Date:   parsed.Format("2006-01-02"),
+		Label:  parsed.Format("Monday, January 2, 2006"),
 	})
 }
 
@@ -315,9 +335,7 @@ func (h *handler) handleSyncAccount(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusInternalServerError, "sync failed: %v", err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, map[string]interface{}{
-		"new_events": newCount,
-	})
+	writeJSON(w, r, http.StatusOK, syncAccountResponse{NewEvents: newCount})
 }
 
 // syncAccount syncs one loaded account and records the outcome on it.
